@@ -11,8 +11,9 @@
         <PublishAot>true</PublishAot>
         <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
         <PublishTrimmed>true</PublishTrimmed>
-        <AllowUnsafeBlocks >true</AllowUnsafeBlocks>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <CsWin32RunAsBuildTask>true</CsWin32RunAsBuildTask>
+        <ApplicationIcon>Assets\app.ico</ApplicationIcon>
 
     </PropertyGroup>
 

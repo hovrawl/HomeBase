@@ -37,7 +37,15 @@ window.Initialize();
 if (window.Native?.Win32 is { } win32Window)
 {
     hwnd = new HWND(win32Window.Hwnd);
+    
+    WindowChrome.HideFromTaskbarAndAltTab(hwnd);
+
     DwmWindowEffects.ApplyDockWindowEffects(hwnd);
+    
+    TrayIcon.Add(hwnd, () =>
+    {
+        window.Close();
+    });
 }
 
 // Setup skia
@@ -63,6 +71,8 @@ GlobalHotkey.Start(() =>
 
 
 window.Run();
+
+TrayIcon.Remove();
 
 skiaRenderTarget?.Dispose();
 skiaSurface?.Dispose();
