@@ -121,6 +121,18 @@ void WindowOnRender(double deltaTime)
     canvas.Flush();
 }
 
+
+void WindowOnFocusChanged(bool focussed)
+{
+    // When focussed make it the top most, otherwise we allow to sink 
+    window.TopMost = focussed;
+    if (!focussed)
+    {
+        // slide off screen
+        DismissDock();
+    }
+}
+
 #region Drawing code
 
 float GetFramebufferScale()
@@ -321,7 +333,7 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
     // Quit
     if (key == Key.Escape)
     {
-        window.IsVisible = false;
+        DismissDock();
         return;
     }
     
@@ -330,23 +342,29 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
     // Activate Selection
 }
 
-void WindowOnFocusChanged(bool focussed)
-{
-    // When focussed make it the top most, otherwise we allow to sink 
-    window.TopMost = focussed;
-    if (!focussed)
-    {
-        // slide off screen
-    }
-}
 
 void SummonDock()
 {
     // Summon window
-    window.IsVisible = true;
-    window.Focus();
+    window.TopMost = true;
     WindowLayout();
+    window.Focus();
     
     SummonCalled = false;
+}
+
+void DismissDock()
+{
+    window.TopMost = false;
+    
+    // Move dock off screen
+    var monitorSize = window.Monitor.Bounds.Size;
+    window.Size = new Vector2D<int>(monitorSize.X / 3, monitorSize.Y / 3);
+    var centerX = monitorSize.X / 2; // middle of screen
+    var bottomY = monitorSize.Y; // bottom of screen
+
+    // minus half our window width so the center point is the centre of the window.
+    // add window Height to ensure we are off screen
+    window.Position = new Vector2D<int>(centerX - window.Size.X / 2, bottomY + window.Size.Y);
 }
 #endregion
