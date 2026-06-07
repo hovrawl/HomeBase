@@ -1,0 +1,13 @@
+﻿RegisterHotKey
+UnregisterHotKey
+GetMessage
+TranslateMessage
+DispatchMessage
+VIRTUAL_KEY
+
+DwmSetWindowAttribute
+DwmExtendFrameIntoClientArea
+DWM_WINDOW_CORNER_PREFERENCE
+DWM_SYSTEMBACKDROP_TYPE
+DWMWINDOWATTRIBUTE
+MARGINS
