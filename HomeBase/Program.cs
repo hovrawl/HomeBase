@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Windows.Win32;
 using Silk.NET.Input;
@@ -806,14 +807,34 @@ void OnDockItemClicked(StorageService.DockItem dockItem)
     // click dock item
     // for programs we will launch
     // other bespoke items will have special actions
-    Console.WriteLine("Dock Item Pressed");
+    if (File.Exists(dockItem.Path))
+    {
+        OpenLikeExplorer(dockItem.Path);
+    }
+}
+
+void OpenLikeExplorer(string path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+        return;
+
+    try
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Failed to open '{path}': {ex.Message}");
+    }
 }
 
 void OpenAddItemDialog()
 {
     // show file picker dialog
-    Console.WriteLine("Add Pressed");
-    
     var result = OpenFilePicker(HWND.Null);
     if (result == null)
         return;
@@ -822,6 +843,7 @@ void OpenAddItemDialog()
     Console.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Path}");
     
     DockItems.Add(dockItem);
+    StorageService.Instance.Save(DockItems);
 }
 
 static unsafe Tuple<string,string>? OpenFilePicker(HWND owner)
