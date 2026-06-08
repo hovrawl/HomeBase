@@ -44,6 +44,7 @@ bool RightMousePressed = false;
 bool RightMouseReleased = false;
 
 string? ActiveElementId = null;
+string? FocusedItemId = null;
 Queue<Action> ActionQueue = new();
 
 // State bools
@@ -53,6 +54,9 @@ bool SummonCalled = false;
 //Storage
 StorageService storageService = new StorageService();
 List<StorageService.DockItem> DockItems = storageService.Load();
+
+Dictionary<string, StorageService.Note> _noteCache = new();
+Dictionary<string, StorageService.TaskList> _taskListCache = new();
 
 GlfwWindowing.Use();
 GlfwInput.RegisterPlatform();
@@ -135,6 +139,7 @@ void WindowOnLoad()
     for (int i = 0; i < WindowInput.Keyboards.Count; i++)
     {
         WindowInput.Keyboards[i].KeyDown += KeyDown;
+        WindowInput.Keyboards[i].KeyChar += KeyChar;
     }
     
 }
@@ -340,72 +345,6 @@ SKRect DrawBackground(SKCanvas canvas)
     return panelRect;
 }
 
-void DrawStartMenuMockContent(SKCanvas canvas, SKRect panelRect)
-{
-    using var titlePaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(32, 32, 32, 255),
-        TextSize = 20
-    };
-
-    canvas.DrawText("Pinned", panelRect.Left + 32, panelRect.Top + 48, titlePaint);
-
-    using var cardPaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(255, 255, 255, 130)
-    };
-
-    using var iconPaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(80, 120, 220, 255)
-    };
-
-    const float paddingX = 32;
-    const float startY = 72;
-    const float cellSize = 72;
-    const float cardSize = 56;
-    const float iconSize = 38;
-    const int itemCount = 18;
-
-    float availableWidth = panelRect.Width - paddingX * 2;
-    int columns = Math.Max(1, (int)Math.Floor(availableWidth / cellSize));
-    int rows = (int)Math.Ceiling(itemCount / (float)columns);
-
-    for (int index = 0; index < itemCount; index++)
-    {
-        int row = index / columns;
-        int column = index % columns;
-
-        float x = panelRect.Left + paddingX + column * cellSize;
-        float y = panelRect.Top + startY + row * cellSize;
-
-        var cardRect = new SKRect(x, y, x + cardSize, y + cardSize);
-        canvas.DrawRoundRect(cardRect, 12, 12, cardPaint);
-
-        float iconX = x + (cardSize - iconSize) / 2;
-        float iconY = y + (cardSize - iconSize) / 2;
-        var iconRect = new SKRect(iconX, iconY, iconX + iconSize, iconY + iconSize);
-        canvas.DrawRoundRect(iconRect, 9, 9, iconPaint);
-    }
-
-    using var footerPaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(255, 255, 255, 105)
-    };
-
-    var footerRect = new SKRect(
-        panelRect.Left + 16,
-        panelRect.Bottom - 72,
-        panelRect.Right - 16,
-        panelRect.Bottom - 16);
-
-    canvas.DrawRoundRect(footerRect, 16, 16, footerPaint);
-}
-
 void DrawDock(SKCanvas canvas, SKRect panelRect)
 {
     using var titlePaint = new SKPaint
@@ -456,13 +395,13 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
     AddMenuRect = GetAddMenuRect(addButtonRect);
 
     // Extra hit test to hide menu if we clicked elsewhere
-    if (IsAddMenuOpen &&
-        LeftMouseReleased &&
-        (!AddMenuRect.Contains(MousePosition.X, MousePosition.Y) 
-         && !addClicked))
+    if (LeftMouseReleased && !addClicked)
     {
-        IsAddMenuOpen = false;
-        ActiveElementId = null;
+        if (IsAddMenuOpen && !AddMenuRect.Contains(MousePosition.X, MousePosition.Y))
+        {
+            IsAddMenuOpen = false;
+            ActiveElementId = null;
+        }
     }
 
     // Ensure we have the context menu rect
@@ -517,24 +456,12 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
     const float startY = 72;
     const float cellSize = 72;
     const float cardSize = 56;
-    const float iconSize = 38;
     var itemCount = DockItems.Count();
 
-    
-    using var cardPaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(255, 255, 255, 130)
-    };
-
-    using var iconPaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(80, 120, 220, 255)
-    };
-    
     float availableWidth = dockPanel.Width - paddingX * 2;
     int columns = Math.Max(1, (int)Math.Floor(availableWidth / cellSize));
+
+    bool anyHovered = false;
 
     for (int index = 0; index < itemCount; index++)
     {
@@ -545,15 +472,36 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
         float x = dockPanel.Left + paddingX + column * cellSize;
         float y = dockPanel.Top + startY + row * cellSize;
 
-        
         var cardRect = new SKRect(x, y, x + cardSize, y + cardSize);
-        
-        string itemId = $"dock-item-{index}";
+        if (cardRect.Contains(MousePosition.X, MousePosition.Y)) anyHovered = true;
 
-        bool rightClicked;
-        if (DockItemButton(canvas, cardRect, item, itemId, out rightClicked))
+        string itemId = $"dock-item-{index}";
+        bool rightClicked = false;
+        bool clicked = false;
+
+        switch (item.Type)
         {
-            ActionQueue.Enqueue(() => OnDockItemClicked(item));
+            case ItemType.File:
+                clicked = DockItemButton(canvas, cardRect, item, itemId, out rightClicked);
+                break;
+            case ItemType.Note:
+                clicked = NoteDockItem(canvas, cardRect, item, itemId, out rightClicked);
+                break;
+            case ItemType.TaskList:
+                clicked = TaskListDockItem(canvas, cardRect, item, itemId, out rightClicked);
+                break;
+        }
+
+        if (clicked)
+        {
+            if (item.Type == ItemType.File)
+            {
+                ActionQueue.Enqueue(() => OnDockItemClicked(item));
+            }
+            else
+            {
+                FocusedItemId = itemId;
+            }
         }
 
         if (rightClicked)
@@ -561,9 +509,164 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
             IsContextMenuOpen = true;
             ContextMenuItemIndex = index;
             ContextMenuPosition = MousePosition;
-            IsAddMenuOpen = false; // Close add menu if it was open
+            IsAddMenuOpen = false;
         }
     }
+
+    if (LeftMouseReleased && !anyHovered && !IsAddMenuOpen && !ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
+    {
+        FocusedItemId = null;
+    }
+}
+
+bool NoteDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
+{
+    rightClicked = false;
+    bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+    bool focused = FocusedItemId == id;
+
+    if (hovered && (LeftMousePressed || RightMousePressed))
+    {
+        ActiveElementId = id;
+    }
+
+    bool active = ActiveElementId == id;
+    bool pressed = active && (LeftMouseDown || RightMouseDown);
+    bool clicked = active && hovered && LeftMouseReleased;
+    rightClicked = active && hovered && RightMouseReleased;
+
+    var bgColor = focused ? new SKColor(255, 255, 180) : new SKColor(255, 255, 220);
+    if (pressed) bgColor = new SKColor(240, 240, 160);
+
+    using var paint = new SKPaint { IsAntialias = true, Color = bgColor };
+    canvas.DrawRoundRect(rect, 4, 4, paint);
+
+    var note = GetNote(item.Value);
+    using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 10 };
+    var textRect = new SKRect(rect.Left + 4, rect.Top + 4, rect.Right - 4, rect.Bottom - 4);
+    DrawTextInRect(canvas, note.Content, textRect, textPaint);
+
+    if (focused)
+    {
+        using var borderPaint = new SKPaint { IsAntialias = true, Color = new SKColor(255, 165, 0), Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
+        canvas.DrawRoundRect(rect, 4, 4, borderPaint);
+    }
+
+    if (active && (LeftMouseReleased || RightMouseReleased)) ActiveElementId = null;
+    return clicked;
+}
+
+bool TaskListDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
+{
+    rightClicked = false;
+    bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+    bool focused = FocusedItemId == id;
+
+    if (hovered && (LeftMousePressed || RightMousePressed))
+    {
+        ActiveElementId = id;
+    }
+
+    bool active = ActiveElementId == id;
+    bool pressed = active && (LeftMouseDown || RightMouseDown);
+    bool clicked = active && hovered && LeftMouseReleased;
+    rightClicked = active && hovered && RightMouseReleased;
+
+    var bgColor = focused ? new SKColor(240, 240, 240) : new SKColor(255, 255, 255);
+    if (pressed) bgColor = new SKColor(220, 220, 220);
+
+    using var paint = new SKPaint { IsAntialias = true, Color = bgColor };
+    canvas.DrawRoundRect(rect, 4, 4, paint);
+
+    var list = GetTaskList(item.Value);
+    using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 9 };
+    
+    float itemHeight = 12;
+    for (int i = 0; i < list.Tasks.Count; i++)
+    {
+        var task = list.Tasks[i];
+        float ty = rect.Top + 6 + i * itemHeight;
+        if (ty + itemHeight > rect.Bottom) break;
+
+        var circleRect = new SKRect(rect.Left + 4, ty, rect.Left + 4 + 8, ty + 8);
+        
+        if (LeftMousePressed && circleRect.Contains(MousePosition.X, MousePosition.Y))
+        {
+            task.IsCompleted = !task.IsCompleted;
+            list.Tasks[i] = task;
+            _taskListCache[item.Value] = list;
+            storageService.SaveTaskList(list);
+        }
+
+        using var circlePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, Color = SKColors.Gray, StrokeWidth = 1 };
+        canvas.DrawOval(circleRect, circlePaint);
+        
+        if (task.IsCompleted)
+        {
+            using var checkPaint = new SKPaint { IsAntialias = true, Color = SKColors.Green, Style = SKPaintStyle.Fill };
+            circleRect.Inflate(-1, -1);
+            canvas.DrawOval(circleRect, checkPaint);
+        }
+
+        canvas.DrawText(task.Text, rect.Left + 16, ty + 7, textPaint);
+    }
+
+    if (focused)
+    {
+        using var borderPaint = new SKPaint { IsAntialias = true, Color = SKColors.DodgerBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
+        canvas.DrawRoundRect(rect, 4, 4, borderPaint);
+    }
+
+    if (active && (LeftMouseReleased || RightMouseReleased)) ActiveElementId = null;
+    return clicked;
+}
+
+void DrawTextInRect(SKCanvas canvas, string text, SKRect rect, SKPaint paint)
+{
+    if (string.IsNullOrEmpty(text)) return;
+    
+    var words = text.Split(' ');
+    var line = "";
+    var x = rect.Left;
+    var y = rect.Top + paint.TextSize;
+    
+    foreach (var word in words)
+    {
+        var testLine = line + (line == "" ? "" : " ") + word;
+        if (paint.MeasureText(testLine) > rect.Width && line != "")
+        {
+            canvas.DrawText(line, x, y, paint);
+            line = word;
+            y += paint.TextSize + 2;
+        }
+        else
+        {
+            line = testLine;
+        }
+        
+        if (y > rect.Bottom) break;
+    }
+    
+    if (y <= rect.Bottom)
+    {
+        canvas.DrawText(line, x, y, paint);
+    }
+}
+
+StorageService.Note GetNote(string id)
+{
+    if (_noteCache.TryGetValue(id, out var note)) return note;
+    note = storageService.LoadNote(id);
+    _noteCache[id] = note;
+    return note;
+}
+
+StorageService.TaskList GetTaskList(string id)
+{
+    if (_taskListCache.TryGetValue(id, out var list)) return list;
+    list = storageService.LoadTaskList(id);
+    _taskListCache[id] = list;
+    return list;
 }
 
 bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
@@ -595,7 +698,7 @@ bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, 
 
     canvas.DrawRoundRect(rect, 12, 12, cardPaint);
 
-    SKImage? icon = GetDockItemIcon(item.Path);
+    SKImage? icon = GetDockItemIcon(item.Value);
 
     if (icon is not null)
     {
@@ -855,9 +958,94 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
         return;
     }
     
-    // Navigation
+    if (FocusedItemId != null)
+    {
+        if (key == Key.Backspace)
+        {
+            int index = int.Parse(FocusedItemId.Substring(10));
+            var item = DockItems[index];
+            if (item.Type == ItemType.Note)
+            {
+                var note = GetNote(item.Value);
+                if (note.Content.Length > 0)
+                {
+                    note.Content = note.Content.Substring(0, note.Content.Length - 1);
+                    _noteCache[item.Value] = note;
+                    storageService.SaveNote(note);
+                }
+            }
+            else if (item.Type == ItemType.TaskList)
+            {
+                var list = GetTaskList(item.Value);
+                if (list.Tasks.Count > 0)
+                {
+                    var lastTask = list.Tasks[^1];
+                    if (lastTask.Text.Length > 0)
+                    {
+                        lastTask.Text = lastTask.Text.Substring(0, lastTask.Text.Length - 1);
+                        list.Tasks[^1] = lastTask;
+                    }
+                    else
+                    {
+                        list.Tasks.RemoveAt(list.Tasks.Count - 1);
+                    }
+                    _taskListCache[item.Value] = list;
+                    storageService.SaveTaskList(list);
+                }
+            }
+        }
+        else if (key == Key.Enter)
+        {
+            int index = int.Parse(FocusedItemId.Substring(10));
+            var item = DockItems[index];
+            if (item.Type == ItemType.Note)
+            {
+                var note = GetNote(item.Value);
+                note.Content += "\n";
+                _noteCache[item.Value] = note;
+                storageService.SaveNote(note);
+            }
+            else if (item.Type == ItemType.TaskList)
+            {
+                var list = GetTaskList(item.Value);
+                list.Tasks.Add(new StorageService.TaskItem("", false));
+                _taskListCache[item.Value] = list;
+                storageService.SaveTaskList(list);
+            }
+        }
+    }
+}
+
+void KeyChar(IKeyboard keyboard, char character)
+{
+    if (FocusedItemId == null) return;
     
-    // Activate Selection
+    if (!FocusedItemId.StartsWith("dock-item-")) return;
+    int index = int.Parse(FocusedItemId.Substring(10));
+    if (index < 0 || index >= DockItems.Count) return;
+    
+    var item = DockItems[index];
+    if (item.Type == ItemType.Note)
+    {
+        var note = GetNote(item.Value);
+        note.Content += character;
+        _noteCache[item.Value] = note;
+        storageService.SaveNote(note);
+    }
+    else if (item.Type == ItemType.TaskList)
+    {
+        var list = GetTaskList(item.Value);
+        if (list.Tasks.Count == 0)
+        {
+            list.Tasks.Add(new StorageService.TaskItem("", false));
+        }
+        
+        var lastTask = list.Tasks[^1];
+        lastTask.Text += character;
+        list.Tasks[^1] = lastTask;
+        _taskListCache[item.Value] = list;
+        storageService.SaveTaskList(list);
+    }
 }
 
 
@@ -1069,7 +1257,7 @@ void OnDockItemClicked(StorageService.DockItem dockItem)
     {
         case ItemType.File:
         {
-            OpenLikeExplorer(dockItem.Path);
+            OpenLikeExplorer(dockItem.Value);
             break;
         }
         case ItemType.Note:
@@ -1111,7 +1299,7 @@ void OpenAddItemDialog()
         return;
     
     var dockItem = new StorageService.DockItem(result.Item1, result.Item2, ItemType.File);
-    Debug.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Path}");
+    Debug.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Value}");
     
     DockItems.Add(dockItem);
     StorageService.Instance.Save(DockItems);
@@ -1119,15 +1307,25 @@ void OpenAddItemDialog()
 
 void CreateNote()
 {
-    var note = new StorageService.DockItem("New Note", "note.txt", ItemType.Note);
-    DockItems.Add(note);
+    string id = Guid.NewGuid().ToString();
+    var note = new StorageService.Note(id, "");
+    storageService.SaveNote(note);
+    _noteCache[id] = note;
+    
+    var dockItem = new StorageService.DockItem("Note", id, ItemType.Note);
+    DockItems.Add(dockItem);
     StorageService.Instance.Save(DockItems);
 }
 
 void CreateTaskList()
 {
-    var taskList = new StorageService.DockItem("New Task List", "tasklist.txt", ItemType.TaskList);
-    DockItems.Add(taskList);
+    string id = Guid.NewGuid().ToString();
+    var taskList = new StorageService.TaskList(id, new List<StorageService.TaskItem>());
+    storageService.SaveTaskList(taskList);
+    _taskListCache[id] = taskList;
+    
+    var dockItem = new StorageService.DockItem("Tasks", id, ItemType.TaskList);
+    DockItems.Add(dockItem);
     StorageService.Instance.Save(DockItems);
 }
 
