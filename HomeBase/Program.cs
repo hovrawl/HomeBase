@@ -45,6 +45,8 @@ bool RightMouseReleased = false;
 
 string? ActiveElementId = null;
 string? FocusedItemId = null;
+int CaretIndex = 0;
+int FocusedTaskListIndex = -1;
 float ItemScale = 1.2f; // Default slightly bigger as requested
 float ScrollOffsetY = 0;
 float TotalContentHeight = 0;
@@ -592,7 +594,20 @@ float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.Dock
             }
             else
             {
-                FocusedItemId = stableId;
+                if (FocusedItemId != stableId)
+                {
+                    FocusedItemId = stableId;
+                    if (item.Type == ItemType.Note)
+                    {
+                        CaretIndex = GetNote(item.Value).Content.Length;
+                    }
+                    else if (item.Type == ItemType.TaskList)
+                    {
+                        var list = GetTaskList(item.Value);
+                        FocusedTaskListIndex = list.Tasks.Count - 1;
+                        CaretIndex = FocusedTaskListIndex >= 0 ? list.Tasks[FocusedTaskListIndex].Text.Length : 0;
+                    }
+                }
             }
         }
 
@@ -643,7 +658,7 @@ bool NoteDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, st
     using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 11 * ItemScale };
     var textPadding = 6 * ItemScale;
     var textRect = new SKRect(rect.Left + textPadding, rect.Top + textPadding, rect.Right - textPadding, rect.Bottom - textPadding);
-    DrawTextInRect(canvas, note.Content, textRect, textPaint);
+    DrawTextInRect(canvas, note.Content, textRect, textPaint, focused);
 
     if (focused)
     {
@@ -711,7 +726,33 @@ bool TaskListDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item
             canvas.DrawOval(circleRect, checkPaint);
         }
 
-        canvas.DrawText(task.Text, rect.Left + padding + circleSize + 6 * ItemScale, ty + itemHeight * 0.75f, textPaint);
+        float textX = rect.Left + padding + circleSize + 6 * ItemScale;
+        float textY = ty + itemHeight * 0.75f;
+        canvas.DrawText(task.Text, textX, textY, textPaint);
+
+        if (focused && FocusedTaskListIndex == i)
+        {
+            float caretX = textX + textPaint.MeasureText(task.Text.Substring(0, Math.Clamp(CaretIndex, 0, task.Text.Length)));
+            using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+            canvas.DrawLine(caretX, ty + itemHeight * 0.2f, caretX, ty + itemHeight * 0.8f, caretPaint);
+        }
+
+        var rowRect = new SKRect(textX, ty, rect.Right - padding, ty + itemHeight);
+        if (focused && LeftMousePressed && rowRect.Contains(MousePosition.X, MousePosition.Y))
+        {
+            FocusedTaskListIndex = i;
+            float localX = MousePosition.X - textX;
+            int bestIdx = 0;
+            float minDist = float.MaxValue;
+            for (int j = 0; j <= task.Text.Length; j++)
+            {
+                float px = textPaint.MeasureText(task.Text.Substring(0, j));
+                float d = Math.Abs(px - localX);
+                if (d < minDist) { minDist = d; bestIdx = j; }
+                else break;
+            }
+            CaretIndex = bestIdx;
+        }
     }
 
     if (focused)
@@ -724,41 +765,103 @@ bool TaskListDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item
     return clicked;
 }
 
-void DrawTextInRect(SKCanvas canvas, string text, SKRect rect, SKPaint paint)
+List<(string text, int startIdx)> GetNoteVisualLines(string content, float width, SKPaint paint)
 {
-    if (string.IsNullOrEmpty(text)) return;
-    
-    var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-    float y = rect.Top + paint.TextSize;
-    float lineHeight = paint.TextSize + 2;
-    
-    foreach (var rawLine in lines)
+    var visualLines = new List<(string text, int startIdx)>();
+    int pos = 0;
+    while (pos <= content.Length)
     {
-        if (y > rect.Bottom) break;
-
-        var words = rawLine.Split(' ');
-        var currentLine = "";
-        
-        foreach (var word in words)
+        int nextNewline = content.IndexOf('\n', pos);
+        string logicalLine;
+        int nextPos;
+        if (nextNewline == -1)
         {
-            var testLine = currentLine == "" ? word : currentLine + " " + word;
-            if (paint.MeasureText(testLine) > rect.Width && currentLine != "")
+            logicalLine = content.Substring(pos);
+            nextPos = content.Length + 1;
+        }
+        else
+        {
+            logicalLine = content.Substring(pos, nextNewline - pos);
+            nextPos = nextNewline + 1;
+        }
+
+        var words = logicalLine.Split(' ');
+        var currentLineText = "";
+        int lineStartIndex = pos;
+
+        for (int i = 0; i < words.Length; i++)
+        {
+            var word = words[i];
+            var testLine = currentLineText == "" ? word : currentLineText + " " + word;
+            
+            if (paint.MeasureText(testLine) > width && currentLineText != "")
             {
-                canvas.DrawText(currentLine, rect.Left, y, paint);
-                y += lineHeight;
-                currentLine = word;
+                visualLines.Add((currentLineText, lineStartIndex));
+                lineStartIndex += currentLineText.Length + 1;
+                currentLineText = word;
             }
             else
             {
-                currentLine = testLine;
+                currentLineText = testLine;
             }
-            if (y > rect.Bottom) break;
         }
+        visualLines.Add((currentLineText, lineStartIndex));
         
-        if (y <= rect.Bottom)
+        pos = nextPos;
+        if (pos > content.Length) break;
+    }
+    return visualLines;
+}
+
+void DrawTextInRect(SKCanvas canvas, string text, SKRect rect, SKPaint paint, bool isFocused = false)
+{
+    if (text == null) text = "";
+    
+    var visualLines = GetNoteVisualLines(text, rect.Width, paint);
+    float y = rect.Top + paint.TextSize;
+    float lineHeight = paint.TextSize + 2;
+
+    if (isFocused && text == "")
+    {
+        using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+        canvas.DrawLine(rect.Left, y - paint.TextSize, rect.Left, y + 2, caretPaint);
+    }
+
+    foreach (var line in visualLines)
+    {
+        if (y - paint.TextSize > rect.Bottom) break;
+        RenderLine(line.text, rect.Left, y, line.startIdx);
+        y += lineHeight;
+    }
+
+    void RenderLine(string lineText, float lx, float ly, int startIdx)
+    {
+        canvas.DrawText(lineText, lx, ly, paint);
+        
+        if (isFocused)
         {
-            canvas.DrawText(currentLine, rect.Left, y, paint);
-            y += lineHeight;
+            var lineRect = new SKRect(lx, ly - paint.TextSize, rect.Right, ly + 2);
+            if (LeftMousePressed && lineRect.Contains(MousePosition.X, MousePosition.Y))
+            {
+                float localX = MousePosition.X - lx;
+                int bestIdx = 0;
+                float minDist = float.MaxValue;
+                for (int j = 0; j <= lineText.Length; j++)
+                {
+                    float px = paint.MeasureText(lineText.Substring(0, j));
+                    float d = Math.Abs(px - localX);
+                    if (d < minDist) { minDist = d; bestIdx = j; }
+                    else break;
+                }
+                CaretIndex = startIdx + bestIdx;
+            }
+            
+            if (CaretIndex >= startIdx && CaretIndex <= startIdx + lineText.Length)
+            {
+                float caretX = lx + paint.MeasureText(lineText.Substring(0, CaretIndex - startIdx));
+                using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+                canvas.DrawLine(caretX, ly - paint.TextSize, caretX, ly + 2, caretPaint);
+            }
         }
     }
 }
@@ -1118,16 +1221,116 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
     
     if (FocusedItemId != null)
     {
-        if (key == Key.Backspace)
+        int index = int.Parse(FocusedItemId.Substring(10));
+        var item = DockItems[index];
+
+        if (key == Key.Left)
         {
-            int index = int.Parse(FocusedItemId.Substring(10));
-            var item = DockItems[index];
+            CaretIndex = Math.Max(0, CaretIndex - 1);
+        }
+        else if (key == Key.Right)
+        {
+            int len = 0;
+            if (item.Type == ItemType.Note) len = GetNote(item.Value).Content.Length;
+            else if (item.Type == ItemType.TaskList)
+            {
+                var list = GetTaskList(item.Value);
+                if (FocusedTaskListIndex >= 0 && FocusedTaskListIndex < list.Tasks.Count)
+                    len = list.Tasks[FocusedTaskListIndex].Text.Length;
+            }
+            CaretIndex = Math.Min(len, CaretIndex + 1);
+        }
+        else if (key == Key.Up)
+        {
             if (item.Type == ItemType.Note)
             {
                 var note = GetNote(item.Value);
-                if (note.Content.Length > 0)
+                float cardSize = (80 - 16) * ItemScale;
+                float textWidth = cardSize - 12 * ItemScale;
+                using var paint = new SKPaint { TextSize = 11 * ItemScale };
+                var visualLines = GetNoteVisualLines(note.Content, textWidth, paint);
+                
+                int currentLineIdx = -1;
+                for (int i = 0; i < visualLines.Count; i++)
                 {
-                    note.Content = note.Content.Substring(0, note.Content.Length - 1);
+                    if (CaretIndex >= visualLines[i].startIdx && CaretIndex <= visualLines[i].startIdx + visualLines[i].text.Length)
+                    {
+                        currentLineIdx = i;
+                        break;
+                    }
+                }
+                
+                if (currentLineIdx > 0)
+                {
+                    int col = CaretIndex - visualLines[currentLineIdx].startIdx;
+                    var prevLine = visualLines[currentLineIdx - 1];
+                    CaretIndex = prevLine.startIdx + Math.Min(col, prevLine.text.Length);
+                }
+                else
+                {
+                    CaretIndex = 0;
+                }
+            }
+            else if (item.Type == ItemType.TaskList)
+            {
+                var list = GetTaskList(item.Value);
+                if (FocusedTaskListIndex > 0)
+                {
+                    FocusedTaskListIndex--;
+                    CaretIndex = Math.Min(CaretIndex, list.Tasks[FocusedTaskListIndex].Text.Length);
+                }
+            }
+        }
+        else if (key == Key.Down)
+        {
+            if (item.Type == ItemType.Note)
+            {
+                var note = GetNote(item.Value);
+                float cardSize = (80 - 16) * ItemScale;
+                float textWidth = cardSize - 12 * ItemScale;
+                using var paint = new SKPaint { TextSize = 11 * ItemScale };
+                var visualLines = GetNoteVisualLines(note.Content, textWidth, paint);
+                
+                int currentLineIdx = -1;
+                for (int i = 0; i < visualLines.Count; i++)
+                {
+                    if (CaretIndex >= visualLines[i].startIdx && CaretIndex <= visualLines[i].startIdx + visualLines[i].text.Length)
+                    {
+                        currentLineIdx = i;
+                        break;
+                    }
+                }
+                
+                if (currentLineIdx != -1 && currentLineIdx < visualLines.Count - 1)
+                {
+                    int col = CaretIndex - visualLines[currentLineIdx].startIdx;
+                    var nextLine = visualLines[currentLineIdx + 1];
+                    CaretIndex = nextLine.startIdx + Math.Min(col, nextLine.text.Length);
+                }
+                else
+                {
+                    CaretIndex = note.Content.Length;
+                }
+            }
+            else if (item.Type == ItemType.TaskList)
+            {
+                var list = GetTaskList(item.Value);
+                if (FocusedTaskListIndex < list.Tasks.Count - 1)
+                {
+                    FocusedTaskListIndex++;
+                    CaretIndex = Math.Min(CaretIndex, list.Tasks[FocusedTaskListIndex].Text.Length);
+                }
+            }
+        }
+        else if (key == Key.Backspace)
+        {
+            if (item.Type == ItemType.Note)
+            {
+                var note = GetNote(item.Value);
+                if (CaretIndex > 0)
+                {
+                    note.Content = note.Content.Remove(CaretIndex - 1, 1);
+                    CaretIndex--;
                     _noteCache[item.Value] = note;
                     storageService.SaveNote(note);
                 }
@@ -1135,38 +1338,93 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
             else if (item.Type == ItemType.TaskList)
             {
                 var list = GetTaskList(item.Value);
-                if (list.Tasks.Count > 0)
+                if (FocusedTaskListIndex >= 0 && FocusedTaskListIndex < list.Tasks.Count)
                 {
-                    var lastTask = list.Tasks[^1];
-                    if (lastTask.Text.Length > 0)
+                    var task = list.Tasks[FocusedTaskListIndex];
+                    if (CaretIndex > 0)
                     {
-                        lastTask.Text = lastTask.Text.Substring(0, lastTask.Text.Length - 1);
-                        list.Tasks[^1] = lastTask;
+                        task.Text = task.Text.Remove(CaretIndex - 1, 1);
+                        CaretIndex--;
+                        list.Tasks[FocusedTaskListIndex] = task;
+                        _taskListCache[item.Value] = list;
+                        storageService.SaveTaskList(list);
                     }
-                    else
+                    else if (FocusedTaskListIndex > 0)
                     {
-                        list.Tasks.RemoveAt(list.Tasks.Count - 1);
+                        var prevTask = list.Tasks[FocusedTaskListIndex - 1];
+                        int oldLen = prevTask.Text.Length;
+                        prevTask.Text += task.Text;
+                        list.Tasks[FocusedTaskListIndex - 1] = prevTask;
+                        list.Tasks.RemoveAt(FocusedTaskListIndex);
+                        FocusedTaskListIndex--;
+                        CaretIndex = oldLen;
+                        _taskListCache[item.Value] = list;
+                        storageService.SaveTaskList(list);
                     }
-                    _taskListCache[item.Value] = list;
-                    storageService.SaveTaskList(list);
+                }
+            }
+        }
+        else if (key == Key.Delete)
+        {
+            if (item.Type == ItemType.Note)
+            {
+                var note = GetNote(item.Value);
+                if (CaretIndex < note.Content.Length)
+                {
+                    note.Content = note.Content.Remove(CaretIndex, 1);
+                    _noteCache[item.Value] = note;
+                    storageService.SaveNote(note);
+                }
+            }
+            else if (item.Type == ItemType.TaskList)
+            {
+                var list = GetTaskList(item.Value);
+                if (FocusedTaskListIndex >= 0 && FocusedTaskListIndex < list.Tasks.Count)
+                {
+                    var task = list.Tasks[FocusedTaskListIndex];
+                    if (CaretIndex < task.Text.Length)
+                    {
+                        task.Text = task.Text.Remove(CaretIndex, 1);
+                        list.Tasks[FocusedTaskListIndex] = task;
+                        _taskListCache[item.Value] = list;
+                        storageService.SaveTaskList(list);
+                    }
+                    else if (FocusedTaskListIndex < list.Tasks.Count - 1)
+                    {
+                        var nextTask = list.Tasks[FocusedTaskListIndex + 1];
+                        task.Text += nextTask.Text;
+                        list.Tasks[FocusedTaskListIndex] = task;
+                        list.Tasks.RemoveAt(FocusedTaskListIndex + 1);
+                        _taskListCache[item.Value] = list;
+                        storageService.SaveTaskList(list);
+                    }
                 }
             }
         }
         else if (key == Key.Enter)
         {
-            int index = int.Parse(FocusedItemId.Substring(10));
-            var item = DockItems[index];
             if (item.Type == ItemType.Note)
             {
                 var note = GetNote(item.Value);
-                note.Content += "\n";
+                note.Content = note.Content.Insert(CaretIndex, "\n");
+                CaretIndex++;
                 _noteCache[item.Value] = note;
                 storageService.SaveNote(note);
             }
             else if (item.Type == ItemType.TaskList)
             {
                 var list = GetTaskList(item.Value);
-                list.Tasks.Add(new StorageService.TaskItem("", false));
+                if (FocusedTaskListIndex < 0) FocusedTaskListIndex = list.Tasks.Count - 1;
+                
+                var currentTask = list.Tasks[FocusedTaskListIndex];
+                var newText = currentTask.Text.Substring(CaretIndex);
+                currentTask.Text = currentTask.Text.Substring(0, CaretIndex);
+                list.Tasks[FocusedTaskListIndex] = currentTask;
+                
+                list.Tasks.Insert(FocusedTaskListIndex + 1, new StorageService.TaskItem(newText, false));
+                FocusedTaskListIndex++;
+                CaretIndex = 0;
+                
                 _taskListCache[item.Value] = list;
                 storageService.SaveTaskList(list);
             }
@@ -1186,7 +1444,9 @@ void KeyChar(IKeyboard keyboard, char character)
     if (item.Type == ItemType.Note)
     {
         var note = GetNote(item.Value);
-        note.Content += character;
+        CaretIndex = Math.Clamp(CaretIndex, 0, note.Content.Length);
+        note.Content = note.Content.Insert(CaretIndex, character.ToString());
+        CaretIndex++;
         _noteCache[item.Value] = note;
         storageService.SaveNote(note);
     }
@@ -1196,11 +1456,16 @@ void KeyChar(IKeyboard keyboard, char character)
         if (list.Tasks.Count == 0)
         {
             list.Tasks.Add(new StorageService.TaskItem("", false));
+            FocusedTaskListIndex = 0;
+            CaretIndex = 0;
         }
         
-        var lastTask = list.Tasks[^1];
-        lastTask.Text += character;
-        list.Tasks[^1] = lastTask;
+        if (FocusedTaskListIndex < 0) FocusedTaskListIndex = list.Tasks.Count - 1;
+        var task = list.Tasks[FocusedTaskListIndex];
+        CaretIndex = Math.Clamp(CaretIndex, 0, task.Text.Length);
+        task.Text = task.Text.Insert(CaretIndex, character.ToString());
+        CaretIndex++;
+        list.Tasks[FocusedTaskListIndex] = task;
         _taskListCache[item.Value] = list;
         storageService.SaveTaskList(list);
     }
