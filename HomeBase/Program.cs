@@ -24,6 +24,8 @@ GRBackendRenderTarget? skiaRenderTarget = null;
 SKSurface? skiaSurface = null;
 Vector2D<int> lastFramebufferSize = new(0, 0);
 IInputContext WindowInput = null;
+bool IsAddMenuOpen = false;
+SKRect AddMenuRect = SKRect.Empty;
 
 Dictionary<string, SKImage> _iconCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -440,9 +442,43 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
         footerRect.Right - 8,
         footerRect.Bottom - 8);
     
-    if (AddButton(canvas, addButtonRect, "add-item"))
+    var addClicked = AddButton(canvas, addButtonRect, "add-item");
+    if (addClicked)
     {
-        ActionQueue.Enqueue(OpenAddItemDialog);
+        IsAddMenuOpen = !IsAddMenuOpen;
+    }
+
+    AddMenuRect = GetAddMenuRect(addButtonRect);
+
+    // Extra hit test to hide menu if we clicked elsewhere
+    if (IsAddMenuOpen &&
+        LeftMouseReleased &&
+        (!AddMenuRect.Contains(MousePosition.X, MousePosition.Y) 
+         && !addClicked))
+    {
+        IsAddMenuOpen = false;
+        ActiveElementId = null;
+    }
+    
+    if (IsAddMenuOpen)
+    {
+        string? selectedAddMenuItem = DrawAddMenu(canvas, addButtonRect);
+
+        if (selectedAddMenuItem == "Item")
+        {
+            IsAddMenuOpen = false;
+            ActionQueue.Enqueue(OpenAddItemDialog);
+        }
+        else if (selectedAddMenuItem == "Note")
+        {
+            IsAddMenuOpen = false;
+            ActionQueue.Enqueue(CreateNote);
+        }
+        else if (selectedAddMenuItem == "TaskList")
+        {
+            IsAddMenuOpen = false;
+            ActionQueue.Enqueue(CreateTaskList);
+        }    
     }
 }
 
@@ -594,6 +630,121 @@ bool AddButton(SKCanvas canvas, SKRect rect, string id)
     return clicked;
 }
 
+SKRect GetAddMenuRect(SKRect addButtonRect)
+{
+    const float menuWidth = 160;
+    const float rowHeight = 40;
+    const float menuPadding = 6;
+
+    return new SKRect(
+        addButtonRect.Right - menuWidth,
+        addButtonRect.Top - rowHeight * 3 - menuPadding * 2 - 8,
+        addButtonRect.Right,
+        addButtonRect.Top - 8);
+}
+
+string? DrawAddMenu(SKCanvas canvas, SKRect addButtonRect)
+{
+    const float menuWidth = 160;
+    const float rowHeight = 40;
+    const float menuPadding = 6;
+
+    AddMenuRect = GetAddMenuRect(addButtonRect);
+
+
+    using var menuPaint = new SKPaint
+    {
+        IsAntialias = true,
+        Color = new SKColor(255, 255, 255, 245)
+    };
+
+    canvas.DrawRoundRect(AddMenuRect, 12, 12, menuPaint);
+
+    var itemRect = new SKRect(
+        AddMenuRect.Left + menuPadding,
+        AddMenuRect.Top + menuPadding,
+        AddMenuRect.Right - menuPadding,
+        AddMenuRect.Top + menuPadding + rowHeight);
+
+    var noteRect = new SKRect(
+        itemRect.Left,
+        itemRect.Bottom,
+        itemRect.Right,
+        itemRect.Bottom + rowHeight);
+
+    var taskListRect = new SKRect(
+        itemRect.Left,
+        noteRect.Bottom,
+        itemRect.Right,
+        noteRect.Bottom + rowHeight);
+
+    if (MenuItem(canvas, itemRect, "Item", "add-menu-item"))
+    {
+        return "Item";
+    }
+
+    if (MenuItem(canvas, noteRect, "Note", "add-menu-note"))
+    {
+        return "Note";
+    }
+
+    if (MenuItem(canvas, taskListRect, "Task List", "add-menu-task-list"))
+    {
+        return "TaskList";
+    }
+
+    return null;
+}
+
+bool MenuItem(SKCanvas canvas, SKRect rect, string text, string id)
+{
+    bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+
+    if (hovered && LeftMousePressed)
+    {
+        ActiveElementId = id;
+    }
+
+    bool active = ActiveElementId == id;
+    bool pressed = active && LeftMouseDown;
+    bool clicked = active && hovered && LeftMouseReleased;
+
+    var backgroundColor = pressed
+        ? new SKColor(220, 220, 220, 255)
+        : hovered
+            ? new SKColor(235, 235, 235, 255)
+            : SKColors.Transparent;
+
+    using var backgroundPaint = new SKPaint
+    {
+        IsAntialias = true,
+        Color = backgroundColor
+    };
+
+    canvas.DrawRoundRect(rect, 8, 8, backgroundPaint);
+
+    using var textPaint = new SKPaint
+    {
+        IsAntialias = true,
+        Color = new SKColor(32, 32, 32, 255)
+    };
+
+    using var textFont = new SKFont
+    {
+        Size = 16,
+        Typeface = SKTypeface.FromFamilyName("Segoe UI")
+    };
+
+    canvas.DrawText(text, rect.Left + 12, rect.MidY + 6, textFont, textPaint);
+
+    if (active && LeftMouseReleased)
+    {
+        ActiveElementId = null;
+    }
+
+    return clicked;
+}
+
 #endregion
 
 #region Methods
@@ -624,6 +775,10 @@ void SummonDock()
 
 void DismissDock()
 {
+    // Remove active element
+    ActiveElementId = null;
+    IsAddMenuOpen = false;
+    // No longer top most
     window.TopMost = false;
     
     // Move dock off screen
@@ -635,6 +790,10 @@ void DismissDock()
     // minus half our window width so the center point is the centre of the window.
     // add window Height to ensure we are off screen
     window.Position = new Vector2D<int>(centerX - window.Size.X / 2, bottomY + window.Size.Y);
+    
+    // Ensure a render happens before we move off screen
+    // this ensures the popups are hidden
+    window.DoRender();
 }
 
 SKImage? GetDockItemIcon(string path)
@@ -828,7 +987,7 @@ void OpenLikeExplorer(string path)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Failed to open '{path}': {ex.Message}");
+        Debug.WriteLine($"Failed to open '{path}': {ex.Message}");
     }
 }
 
@@ -840,9 +999,23 @@ void OpenAddItemDialog()
         return;
     
     var dockItem = new StorageService.DockItem(result.Item1, result.Item2);
-    Console.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Path}");
+    Debug.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Path}");
     
     DockItems.Add(dockItem);
+    StorageService.Instance.Save(DockItems);
+}
+
+void CreateNote()
+{
+    var note = new StorageService.DockItem("New Note", "note.txt");
+    DockItems.Add(note);
+    StorageService.Instance.Save(DockItems);
+}
+
+void CreateTaskList()
+{
+    var taskList = new StorageService.DockItem("New Task List", "tasklist.txt");
+    DockItems.Add(taskList);
     StorageService.Instance.Save(DockItems);
 }
 
