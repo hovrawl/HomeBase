@@ -37,7 +37,14 @@ public class StorageService
         File.WriteAllText(_filePath, json);
     }
 
-    public record struct DockItem(string Name, string Path);
+    public record struct DockItem(string Name, string Path, ItemType Type);
+}
+
+public enum ItemType
+{
+    File,
+    Note,
+    TaskList
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

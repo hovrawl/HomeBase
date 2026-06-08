@@ -1064,9 +1064,22 @@ void OnDockItemClicked(StorageService.DockItem dockItem)
     // click dock item
     // for programs we will launch
     // other bespoke items will have special actions
-    if (File.Exists(dockItem.Path))
+    
+    switch(dockItem.Type)
     {
-        OpenLikeExplorer(dockItem.Path);
+        case ItemType.File:
+        {
+            OpenLikeExplorer(dockItem.Path);
+            break;
+        }
+        case ItemType.Note:
+        {
+            break;
+        }
+        case ItemType.TaskList:
+        {
+            break;
+        }
     }
 }
 
@@ -1074,7 +1087,8 @@ void OpenLikeExplorer(string path)
 {
     if (string.IsNullOrWhiteSpace(path))
         return;
-
+    if (!File.Exists(path))
+        return;
     try
     {
         Process.Start(new ProcessStartInfo
@@ -1096,7 +1110,7 @@ void OpenAddItemDialog()
     if (result == null)
         return;
     
-    var dockItem = new StorageService.DockItem(result.Item1, result.Item2);
+    var dockItem = new StorageService.DockItem(result.Item1, result.Item2, ItemType.File);
     Debug.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Path}");
     
     DockItems.Add(dockItem);
@@ -1105,14 +1119,14 @@ void OpenAddItemDialog()
 
 void CreateNote()
 {
-    var note = new StorageService.DockItem("New Note", "note.txt");
+    var note = new StorageService.DockItem("New Note", "note.txt", ItemType.Note);
     DockItems.Add(note);
     StorageService.Instance.Save(DockItems);
 }
 
 void CreateTaskList()
 {
-    var taskList = new StorageService.DockItem("New Task List", "tasklist.txt");
+    var taskList = new StorageService.DockItem("New Task List", "tasklist.txt", ItemType.TaskList);
     DockItems.Add(taskList);
     StorageService.Instance.Save(DockItems);
 }
