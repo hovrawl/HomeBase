@@ -359,27 +359,10 @@ SKRect DrawBackground(SKCanvas canvas)
 
 void DrawDock(SKCanvas canvas, SKRect panelRect)
 {
-    using var titlePaint = new SKPaint
-    {
-        IsAntialias = true,
-        Color = new SKColor(32, 32, 32, 255),
-        //TextSize = 20,
-    };
-    using var titleFont = new SKFont
-    {
-        Size = 20,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI"),
-    };
-    
-    const string DockText = "Docked Items";
-    string title = CurrentViewMode == ViewMode.All ? "All Items" : "Grouped Items";
-
-    canvas.DrawText(title, panelRect.Left + 32, panelRect.Top + 48, titleFont, titlePaint);
-
     // Items Viewport
     var viewportRect = new SKRect(
         panelRect.Left,
-        panelRect.Top + 60,
+        panelRect.Top + 16,
         panelRect.Right,
         panelRect.Bottom - 80);
 
@@ -519,9 +502,15 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
 
 float DrawDockItems(SKCanvas canvas, SKRect dockPanel)
 {
-    float currentY = 72;
+    float currentY = 16;
     if (CurrentViewMode == ViewMode.All)
     {
+        using var groupTitlePaint = new SKPaint { IsAntialias = true, Color = SKColors.DimGray };
+        using var groupTitleFont = new SKFont { Size = 14, Typeface = SKTypeface.FromFamilyName("Segoe UI Semibold") };
+        
+        canvas.DrawText("All Items", dockPanel.Left + 32, dockPanel.Top + currentY + 20, groupTitleFont, groupTitlePaint);
+        currentY += 30;
+
         currentY += DrawItemsList(canvas, dockPanel, DockItems.Select((item, index) => (item, index)).ToList(), currentY);
     }
     else
