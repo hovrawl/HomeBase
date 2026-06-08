@@ -9,7 +9,11 @@ using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.System.Com;
 using Windows.Win32.UI.Shell;
+using Silk.NET.GLFW;
+using Silk.NET.Input.Glfw;
+using Silk.NET.Windowing.Glfw;
 using WinDock;
+using MouseButton = Silk.NET.Input.MouseButton;
 using WindowState = Silk.NET.Windowing.WindowState;
 
 // Window handle
@@ -42,7 +46,8 @@ bool SummonCalled = false;
 StorageService storageService = new StorageService();
 List<StorageService.DockItem> DockItems = storageService.Load();
 
-
+GlfwWindowing.Use();
+GlfwInput.RegisterPlatform();
 
 // setup window
 var windowOptions = WindowOptions.Default;
