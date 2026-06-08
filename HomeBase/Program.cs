@@ -88,6 +88,10 @@ window.Load += WindowOnLoad;
 
 window.Initialize();
 
+// Position before applying DWM effects as it forces a show
+if (window.Monitor != null) 
+    CentreWindow();
+
 // Apply DWM effects
 if (window.Native?.Win32 is { } win32Window)
 {
@@ -122,7 +126,6 @@ GlobalHotkey.Start(() =>
     // Summon/focus your window here.
     SummonCalled = true;
 });
-
 
 
 window.Run();
@@ -258,8 +261,11 @@ void WindowLayout()
 
     // Flag so it doesn't run again
     didInitialLayout = true;
-    
+    CentreWindow();
+}
 
+void CentreWindow()
+{
     var monitorSize = window.Monitor.Bounds.Size;
     window.Size = new Vector2D<int>(monitorSize.X / 3, monitorSize.Y / 3);
     var centerX = monitorSize.X / 2; // middle of screen
