@@ -27,6 +27,11 @@ IInputContext WindowInput = null;
 bool IsAddMenuOpen = false;
 SKRect AddMenuRect = SKRect.Empty;
 
+bool IsContextMenuOpen = false;
+SKRect ContextMenuRect = SKRect.Empty;
+int ContextMenuItemIndex = -1;
+Vector2 ContextMenuPosition = Vector2.Zero;
+
 Dictionary<string, SKImage> _iconCache = new(StringComparer.OrdinalIgnoreCase);
 
 // Mouse Globals
@@ -459,6 +464,18 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
         IsAddMenuOpen = false;
         ActiveElementId = null;
     }
+
+    // Ensure we have the context menu rect
+    ContextMenuRect = GetContextMenuRect(ContextMenuPosition);
+
+    // Extra hit test to hide context menu if we clicked elsewhere
+    if (IsContextMenuOpen &&
+        (LeftMouseReleased || RightMouseReleased) &&
+        !ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
+    {
+        IsContextMenuOpen = false;
+        ActiveElementId = null;
+    }
     
     if (IsAddMenuOpen)
     {
@@ -479,6 +496,18 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
             IsAddMenuOpen = false;
             ActionQueue.Enqueue(CreateTaskList);
         }    
+    }
+
+    if (IsContextMenuOpen)
+    {
+        string? selectedContextAction = DrawContextMenu(canvas);
+
+        if (selectedContextAction == "Remove")
+        {
+            IsContextMenuOpen = false;
+            int indexToRemove = ContextMenuItemIndex;
+            ActionQueue.Enqueue(() => RemoveDockItem(indexToRemove));
+        }
     }
 }
 
@@ -521,25 +550,36 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
         
         string itemId = $"dock-item-{index}";
 
-        if (DockItemButton(canvas, cardRect, item, itemId))
+        bool rightClicked;
+        if (DockItemButton(canvas, cardRect, item, itemId, out rightClicked))
         {
             ActionQueue.Enqueue(() => OnDockItemClicked(item));
+        }
+
+        if (rightClicked)
+        {
+            IsContextMenuOpen = true;
+            ContextMenuItemIndex = index;
+            ContextMenuPosition = MousePosition;
+            IsAddMenuOpen = false; // Close add menu if it was open
         }
     }
 }
 
-bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id)
+bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
 {
+    rightClicked = false;
     bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
 
-    if (hovered && LeftMousePressed)
+    if (hovered && (LeftMousePressed || RightMousePressed))
     {
         ActiveElementId = id;
     }
 
     bool active = ActiveElementId == id;
-    bool pressed = active && LeftMouseDown;
+    bool pressed = active && (LeftMouseDown || RightMouseDown);
     bool clicked = active && hovered && LeftMouseReleased;
+    rightClicked = active && hovered && RightMouseReleased;
 
     var cardColor = pressed
         ? new SKColor(230, 230, 230, 180)
@@ -571,7 +611,7 @@ bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, 
         canvas.DrawImage(icon, iconRect);
     }
     
-    if (active && LeftMouseReleased)
+    if (active && (LeftMouseReleased || RightMouseReleased))
     {
         ActiveElementId = null;
     }
@@ -622,7 +662,7 @@ bool AddButton(SKCanvas canvas, SKRect rect, string id)
     canvas.DrawLine(centerX - plusSize, centerY, centerX + plusSize, centerY, plusPaint);
     canvas.DrawLine(centerX, centerY - plusSize, centerX, centerY + plusSize, plusPaint);
 
-    if (active && LeftMouseReleased)
+    if (active && (LeftMouseReleased || RightMouseReleased))
     {
         ActiveElementId = null;
     }
@@ -737,12 +777,70 @@ bool MenuItem(SKCanvas canvas, SKRect rect, string text, string id)
 
     canvas.DrawText(text, rect.Left + 12, rect.MidY + 6, textFont, textPaint);
 
-    if (active && LeftMouseReleased)
+    if (active && (LeftMouseReleased || RightMouseReleased))
     {
         ActiveElementId = null;
     }
 
     return clicked;
+}
+
+SKRect GetContextMenuRect(Vector2 position)
+{
+    const float menuWidth = 140;
+    const float rowHeight = 40;
+    const float menuPadding = 6;
+
+    // Position menu so it stays within window bounds if possible
+    float x = position.X;
+    float y = position.Y;
+    
+    if (x + menuWidth > lastFramebufferSize.X)
+    {
+        x = lastFramebufferSize.X - menuWidth - 4;
+    }
+    
+    if (y + rowHeight + menuPadding * 2 > lastFramebufferSize.Y)
+    {
+        y = lastFramebufferSize.Y - (rowHeight + menuPadding * 2) - 4;
+    }
+
+    ContextMenuRect = new SKRect(
+        x,
+        y,
+        x + menuWidth,
+        y + rowHeight + menuPadding * 2);
+
+    return ContextMenuRect;
+}
+
+string? DrawContextMenu(SKCanvas canvas)
+{
+    const float rowHeight = 40;
+    const float menuPadding = 6;
+    
+    ContextMenuRect = GetContextMenuRect(ContextMenuPosition);
+
+    using var menuPaint = new SKPaint
+    {
+        IsAntialias = true,
+        Color = new SKColor(255, 255, 255, 245)
+    };
+
+    canvas.DrawRoundRect(ContextMenuRect, 12, 12, menuPaint);
+
+    var removeRect = new SKRect(
+        ContextMenuRect.Left + menuPadding,
+        ContextMenuRect.Top + menuPadding,
+        ContextMenuRect.Right - menuPadding,
+        ContextMenuRect.Top + menuPadding + rowHeight);
+
+    if (MenuItem(canvas, removeRect, "Remove", "context-menu-remove"))
+    {
+        return "Remove";
+    }
+
+    return null;
 }
 
 #endregion
@@ -1017,6 +1115,15 @@ void CreateTaskList()
     var taskList = new StorageService.DockItem("New Task List", "tasklist.txt");
     DockItems.Add(taskList);
     StorageService.Instance.Save(DockItems);
+}
+
+void RemoveDockItem(int index)
+{
+    if (index >= 0 && index < DockItems.Count)
+    {
+        DockItems.RemoveAt(index);
+        StorageService.Instance.Save(DockItems);
+    }
 }
 
 static unsafe Tuple<string,string>? OpenFilePicker(HWND owner)
