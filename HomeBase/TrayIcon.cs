@@ -68,7 +68,7 @@ internal static unsafe class TrayIcon
             hIcon = icon
         };
 
-        string tooltip = "WinDock";
+        string tooltip = "HomeBase";
 
         fixed (char* tip = _data.szTip.Value)
         {

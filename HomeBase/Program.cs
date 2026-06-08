@@ -12,7 +12,7 @@ using Windows.Win32.UI.Shell;
 using Silk.NET.GLFW;
 using Silk.NET.Input.Glfw;
 using Silk.NET.Windowing.Glfw;
-using WinDock;
+using HomeBase;
 using MouseButton = Silk.NET.Input.MouseButton;
 using WindowState = Silk.NET.Windowing.WindowState;
 
@@ -51,11 +51,11 @@ GlfwInput.RegisterPlatform();
 
 // setup window
 var windowOptions = WindowOptions.Default;
-windowOptions.Title = "WinDock";
+windowOptions.Title = "HomeBase";
 windowOptions.TopMost = true;
 windowOptions.WindowBorder = WindowBorder.Hidden;
 windowOptions.WindowState = WindowState.Normal;
-windowOptions.WindowClass = "Hovrawl.WinDock";
+windowOptions.WindowClass = "Hovrawl.HomeBase";
 windowOptions.PreferredStencilBufferBits = 8;
 windowOptions.PreferredBitDepth = new Vector4D<int>(8, 8, 8, 8);
 windowOptions.TransparentFramebuffer = true;

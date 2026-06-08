@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 
-namespace WinDock;
+namespace HomeBase;
 
 public class StorageService
 {
@@ -16,7 +16,7 @@ public class StorageService
     {
         string appDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "WinDock"
+            "HomeBase"
         );
         Directory.CreateDirectory(appDataFolder);
         _filePath = Path.Combine(appDataFolder, "storage.json");
