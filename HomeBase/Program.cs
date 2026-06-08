@@ -60,6 +60,15 @@ bool didInitialLayout = false;
 bool SummonCalled = false;
 ViewMode CurrentViewMode = ViewMode.All;
 
+// Animation State
+DockAnimationState DockState = DockAnimationState.Hidden;
+Vector2D<int> DockShownPosition = default;
+Vector2D<int> DockHiddenPosition = default;
+Vector2 DockAnimationStartPosition = default;
+Vector2 DockAnimationTargetPosition = default;
+float DockAnimationTime = 0f;
+float DockAnimationDuration = 0.22f;
+
 //Storage
 StorageService storageService = new StorageService();
 List<StorageService.DockItem> DockItems = storageService.Load();
@@ -89,8 +98,11 @@ window.Load += WindowOnLoad;
 window.Initialize();
 
 // Position before applying DWM effects as it forces a show
-if (window.Monitor != null) 
-    CentreWindow();
+if (window.Monitor != null)
+{
+    CalculateDockPositions();
+    window.Position = DockHiddenPosition;
+}
 
 // Apply DWM effects
 if (window.Native?.Win32 is { } win32Window)
@@ -169,6 +181,8 @@ void WindowOnUpdate(double deltaTime)
     // Initial layout
     if (!didInitialLayout) WindowLayout();
     
+    UpdateDockAnimation(deltaTime);
+    
     if (SummonCalled) SummonDock();
     
     // Query Mouse Position
@@ -229,9 +243,11 @@ void WindowOnRender(double deltaTime)
 
 void WindowOnFocusChanged(bool focussed)
 {
-    // When focussed make it the top most, otherwise we allow to sink 
-    window.TopMost = focussed;
-    if (!focussed)
+    if (focussed)
+    {
+        window.TopMost = true;
+    }
+    else
     {
         // slide off screen
         DismissDock();
@@ -261,24 +277,75 @@ void WindowLayout()
 
     // Flag so it doesn't run again
     didInitialLayout = true;
-    CentreWindow();
+    
+    CalculateDockPositions();
+    window.Position = DockHiddenPosition;
+    DockState = DockAnimationState.Hidden;
 }
 
-void CentreWindow()
+void CalculateDockPositions()
 {
+    if (window.Monitor == null) return;
+
     var monitorSize = window.Monitor.Bounds.Size;
     window.Size = new Vector2D<int>(monitorSize.X / 3, monitorSize.Y / 3);
-    var centerX = monitorSize.X / 2; // middle of screen
-    var bottomY = monitorSize.Y; // bottom of screen
-    var bottomPadding = 4; // lift window up slightly
-    
-    // set new window options for new default position that we will interpolate up from
-    // use bottom of screen as window will move off screen
-    // windowOptions.Position = new Vector2D<int>(centerX - window.Size.X / 2, bottomY);
+    var centerX = monitorSize.X / 2;
+    var bottomY = monitorSize.Y;
+    var bottomPadding = 4;
 
-    // minus half our window width so the center point is the centre of the window.
-    // minus entire window height so bottom of the window is where the desired point is
-    window.Position = new Vector2D<int>(centerX - window.Size.X / 2, bottomY - window.Size.Y - bottomPadding);
+    int x = centerX - window.Size.X / 2;
+
+    DockShownPosition = new Vector2D<int>(
+        x,
+        bottomY - window.Size.Y - bottomPadding);
+
+    DockHiddenPosition = new Vector2D<int>(
+        x,
+        bottomY + window.Size.Y);
+}
+
+void UpdateDockAnimation(double deltaTime)
+{
+    if (DockState != DockAnimationState.Showing &&
+        DockState != DockAnimationState.Hiding)
+    {
+        return;
+    }
+
+    DockAnimationTime += (float)deltaTime;
+
+    float t = DockAnimationTime / DockAnimationDuration;
+    t = Math.Clamp(t, 0f, 1f);
+
+    float easedT = DockState == DockAnimationState.Showing
+        ? EaseOutCubic(t)
+        : EaseInCubic(t);
+
+    Vector2 position = Lerp(
+        DockAnimationStartPosition,
+        DockAnimationTargetPosition,
+        easedT);
+
+    window.Position = new Vector2D<int>(
+        (int)MathF.Round(position.X),
+        (int)MathF.Round(position.Y));
+
+    if (t >= 1f)
+    {
+        window.Position = new Vector2D<int>(
+            (int)MathF.Round(DockAnimationTargetPosition.X),
+            (int)MathF.Round(DockAnimationTargetPosition.Y));
+
+        if (DockState == DockAnimationState.Hiding)
+        {
+            DockState = DockAnimationState.Hidden;
+            window.TopMost = false;
+        }
+        else
+        {
+            DockState = DockAnimationState.Shown;
+        }
+    }
 }
 
 void EnsureSkiaSurface()
@@ -1646,36 +1713,53 @@ void KeyChar(IKeyboard keyboard, char character)
 
 void SummonDock()
 {
-    // Summon window
     window.TopMost = true;
-    WindowLayout();
+
+    CalculateDockPositions();
+
+    if (DockState == DockAnimationState.Hidden)
+    {
+        window.Position = DockHiddenPosition;
+    }
+
+    DockAnimationStartPosition = new Vector2(
+        window.Position.X,
+        window.Position.Y);
+
+    DockAnimationTargetPosition = new Vector2(
+        DockShownPosition.X,
+        DockShownPosition.Y);
+
+    DockAnimationTime = 0f;
+    DockState = DockAnimationState.Showing;
+
     window.Focus();
-    
+
     SummonCalled = false;
 }
 
 void DismissDock()
 {
-    if (RenamingItemId != null) SaveRenaming();
-    // Remove active element
+    if (RenamingItemId != null)
+    {
+        SaveRenaming();
+    }
+
     ActiveElementId = null;
     IsAddMenuOpen = false;
-    // No longer top most
-    window.TopMost = false;
-    
-    // Move dock off screen
-    var monitorSize = window.Monitor.Bounds.Size;
-    window.Size = new Vector2D<int>(monitorSize.X / 3, monitorSize.Y / 3);
-    var centerX = monitorSize.X / 2; // middle of screen
-    var bottomY = monitorSize.Y; // bottom of screen
 
-    // minus half our window width so the center point is the centre of the window.
-    // add window Height to ensure we are off screen
-    window.Position = new Vector2D<int>(centerX - window.Size.X / 2, bottomY + window.Size.Y);
-    
-    // Ensure a render happens before we move off screen
-    // this ensures the popups are hidden
-    window.DoRender();
+    CalculateDockPositions();
+
+    DockAnimationStartPosition = new Vector2(
+        window.Position.X,
+        window.Position.Y);
+
+    DockAnimationTargetPosition = new Vector2(
+        DockHiddenPosition.X,
+        DockHiddenPosition.Y);
+
+    DockAnimationTime = 0f;
+    DockState = DockAnimationState.Hiding;
 }
 
 SKImage? GetDockItemIcon(string path)
@@ -2004,6 +2088,25 @@ static unsafe Tuple<string,string>? OpenFilePicker(HWND owner)
 }
 
 
+
+static float EaseOutCubic(float t)
+{
+    t = Math.Clamp(t, 0f, 1f);
+    return 1f - MathF.Pow(1f - t, 3f);
+}
+
+static float EaseInCubic(float t)
+{
+    t = Math.Clamp(t, 0f, 1f);
+    return t * t * t;
+}
+
+static Vector2 Lerp(Vector2 a, Vector2 b, float t)
+{
+    return a + (b - a) * t;
+}
+
 enum ViewMode { All, Grouped }
+enum DockAnimationState { Hidden, Showing, Shown, Hiding }
 
 #endregion
