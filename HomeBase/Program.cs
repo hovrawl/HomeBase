@@ -45,7 +45,9 @@ bool RightMouseReleased = false;
 
 string? ActiveElementId = null;
 string? FocusedItemId = null;
+string? RenamingItemId = null;
 int CaretIndex = 0;
+int RenamingCaretIndex = 0;
 int FocusedTaskListIndex = -1;
 float ItemScale = 1.2f; // Default slightly bigger as requested
 float ScrollOffsetY = 0;
@@ -499,6 +501,13 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
             int indexToRemove = ContextMenuItemIndex;
             ActionQueue.Enqueue(() => RemoveDockItem(indexToRemove));
         }
+        else if (selectedContextAction == "Rename")
+        {
+            IsContextMenuOpen = false;
+            int indexToRename = ContextMenuItemIndex;
+            RenamingItemId = $"dock-item-{indexToRename}";
+            RenamingCaretIndex = DockItems[indexToRename].Name.Length;
+        }
     }
 }
 
@@ -548,11 +557,13 @@ float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.Dock
 {
     const float paddingX = 32;
     float baseCellSize = 80;
-    float cellSize = baseCellSize * ItemScale;
+    float cellWidth = baseCellSize * ItemScale;
+    float labelHeight = 20 * ItemScale;
+    float cellHeight = cellWidth + labelHeight;
     float cardSize = (baseCellSize - 16) * ItemScale;
 
     float availableWidth = dockPanel.Width - paddingX * 2;
-    int columns = Math.Max(1, (int)Math.Floor(availableWidth / cellSize));
+    int columns = Math.Max(1, (int)Math.Floor(availableWidth / cellWidth));
     int rows = (int)Math.Ceiling((float)items.Count / columns);
 
     bool anyHovered = false;
@@ -563,8 +574,8 @@ float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.Dock
         int row = i / columns;
         int column = i % columns;
 
-        float x = dockPanel.Left + paddingX + column * cellSize;
-        float y = dockPanel.Top + startY + row * cellSize;
+        float x = dockPanel.Left + paddingX + column * cellWidth;
+        float y = dockPanel.Top + startY + row * cellHeight;
 
         var cardRect = new SKRect(x, y, x + cardSize, y + cardSize);
         if (cardRect.Contains(MousePosition.X, MousePosition.Y)) anyHovered = true;
@@ -586,8 +597,17 @@ float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.Dock
                 break;
         }
 
+        var labelRect = new SKRect(x, y + cardSize + 2 * ItemScale, x + cardSize, y + cardSize + labelHeight);
+        if (labelRect.Contains(MousePosition.X, MousePosition.Y)) anyHovered = true;
+        DrawItemLabel(canvas, labelRect, item, stableId);
+
         if (clicked)
         {
+            if (RenamingItemId != null && RenamingItemId != stableId)
+            {
+                SaveRenaming();
+            }
+
             if (item.Type == ItemType.File)
             {
                 ActionQueue.Enqueue(() => OnDockItemClicked(item));
@@ -613,6 +633,8 @@ float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.Dock
 
         if (rightClicked)
         {
+            if (RenamingItemId != null) SaveRenaming();
+            
             IsContextMenuOpen = true;
             ContextMenuItemIndex = originalIndex;
             ContextMenuPosition = MousePosition;
@@ -625,10 +647,86 @@ float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.Dock
         if (dockPanel.Contains(MousePosition.X, MousePosition.Y))
         {
             FocusedItemId = null;
+            if (RenamingItemId != null) SaveRenaming();
         }
     }
 
-    return rows * cellSize;
+    return rows * cellHeight;
+}
+
+void DrawItemLabel(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id)
+{
+    bool isRenaming = RenamingItemId == id;
+    string text = item.Name;
+    
+    using var paint = new SKPaint 
+    { 
+        IsAntialias = true, 
+        Color = SKColors.Black, 
+        TextSize = 11 * ItemScale,
+        Typeface = SKTypeface.FromFamilyName("Segoe UI")
+    };
+
+    if (isRenaming)
+    {
+        // Draw background for editing
+        using var bgPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        canvas.DrawRoundRect(rect, 4 * ItemScale, 4 * ItemScale, bgPaint);
+        using var borderPaint = new SKPaint { Color = SKColors.DodgerBlue, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1 * ItemScale };
+        canvas.DrawRoundRect(rect, 4 * ItemScale, 4 * ItemScale, borderPaint);
+
+        float textX = rect.Left + 4 * ItemScale;
+        float textY = rect.MidY + paint.TextSize / 3;
+        canvas.DrawText(text, textX, textY, paint);
+
+        // Draw caret
+        float caretX = textX + paint.MeasureText(text.Substring(0, Math.Clamp(RenamingCaretIndex, 0, text.Length)));
+        using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+        canvas.DrawLine(caretX, rect.Top + 4 * ItemScale, caretX, rect.Bottom - 4 * ItemScale, caretPaint);
+
+        // Handle click to move caret
+        if (LeftMousePressed && rect.Contains(MousePosition.X, MousePosition.Y))
+        {
+            float localX = MousePosition.X - textX;
+            int bestIdx = 0;
+            float minDist = float.MaxValue;
+            for (int j = 0; j <= text.Length; j++)
+            {
+                float px = paint.MeasureText(text.Substring(0, j));
+                float d = Math.Abs(px - localX);
+                if (d < minDist) { minDist = d; bestIdx = j; }
+                else break;
+            }
+            RenamingCaretIndex = bestIdx;
+        }
+    }
+    else
+    {
+        // Draw normal label
+        float textWidth = paint.MeasureText(text);
+        // Center text in rect
+        float textX = rect.MidX - textWidth / 2;
+        float textY = rect.MidY + paint.TextSize / 3;
+        
+        // Simple eliding if too long
+        if (textWidth > rect.Width)
+        {
+            text = text.Substring(0, Math.Max(0, text.Length - 3)) + "...";
+            textWidth = paint.MeasureText(text);
+            textX = rect.MidX - textWidth / 2;
+        }
+
+        canvas.DrawText(text, textX, textY, paint);
+    }
+}
+
+void SaveRenaming()
+{
+    if (RenamingItemId != null && RenamingItemId.StartsWith("dock-item-"))
+    {
+        StorageService.Instance.Save(DockItems);
+    }
+    RenamingItemId = null;
 }
 
 bool NoteDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
@@ -1164,16 +1262,19 @@ SKRect GetContextMenuRect(Vector2 position)
         x = lastFramebufferSize.X - menuWidth - 4;
     }
     
-    if (y + rowHeight + menuPadding * 2 > lastFramebufferSize.Y)
+    int rowCount = 2; // Remove, Rename
+    float totalHeight = (rowHeight * rowCount) + menuPadding * 2;
+
+    if (y + totalHeight > lastFramebufferSize.Y)
     {
-        y = lastFramebufferSize.Y - (rowHeight + menuPadding * 2) - 4;
+        y = lastFramebufferSize.Y - totalHeight - 4;
     }
 
     ContextMenuRect = new SKRect(
         x,
         y,
         x + menuWidth,
-        y + rowHeight + menuPadding * 2);
+        y + totalHeight);
 
     return ContextMenuRect;
 }
@@ -1193,11 +1294,22 @@ string? DrawContextMenu(SKCanvas canvas)
 
     canvas.DrawRoundRect(ContextMenuRect, 12, 12, menuPaint);
 
-    var removeRect = new SKRect(
+    var renameRect = new SKRect(
         ContextMenuRect.Left + menuPadding,
         ContextMenuRect.Top + menuPadding,
         ContextMenuRect.Right - menuPadding,
         ContextMenuRect.Top + menuPadding + rowHeight);
+
+    var removeRect = new SKRect(
+        renameRect.Left,
+        renameRect.Bottom,
+        renameRect.Right,
+        renameRect.Bottom + rowHeight);
+
+    if (MenuItem(canvas, renameRect, "Rename", "context-menu-rename"))
+    {
+        return "Rename";
+    }
 
     if (MenuItem(canvas, removeRect, "Remove", "context-menu-remove"))
     {
@@ -1215,7 +1327,51 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
     // Quit
     if (key == Key.Escape)
     {
+        if (RenamingItemId != null)
+        {
+            SaveRenaming();
+            return;
+        }
         DismissDock();
+        return;
+    }
+
+    if (RenamingItemId != null)
+    {
+        int index = int.Parse(RenamingItemId.Substring(10));
+        var item = DockItems[index];
+
+        if (key == Key.Enter)
+        {
+            SaveRenaming();
+            return;
+        }
+        
+        if (key == Key.Left)
+        {
+            RenamingCaretIndex = Math.Max(0, RenamingCaretIndex - 1);
+        }
+        else if (key == Key.Right)
+        {
+            RenamingCaretIndex = Math.Min(item.Name.Length, RenamingCaretIndex + 1);
+        }
+        else if (key == Key.Backspace)
+        {
+            if (RenamingCaretIndex > 0)
+            {
+                item.Name = item.Name.Remove(RenamingCaretIndex - 1, 1);
+                RenamingCaretIndex--;
+                DockItems[index] = item;
+            }
+        }
+        else if (key == Key.Delete)
+        {
+            if (RenamingCaretIndex < item.Name.Length)
+            {
+                item.Name = item.Name.Remove(RenamingCaretIndex, 1);
+                DockItems[index] = item;
+            }
+        }
         return;
     }
     
@@ -1434,6 +1590,16 @@ void KeyDown(IKeyboard keyboard, Key key, int keyCode)
 
 void KeyChar(IKeyboard keyboard, char character)
 {
+    if (RenamingItemId != null)
+    {
+        int renameIndex = int.Parse(RenamingItemId.Substring(10));
+        var renameItem = DockItems[renameIndex];
+        renameItem.Name = renameItem.Name.Insert(RenamingCaretIndex, character.ToString());
+        RenamingCaretIndex++;
+        DockItems[renameIndex] = renameItem;
+        return;
+    }
+
     if (FocusedItemId == null) return;
     
     if (!FocusedItemId.StartsWith("dock-item-")) return;
@@ -1484,6 +1650,7 @@ void SummonDock()
 
 void DismissDock()
 {
+    if (RenamingItemId != null) SaveRenaming();
     // Remove active element
     ActiveElementId = null;
     IsAddMenuOpen = false;
