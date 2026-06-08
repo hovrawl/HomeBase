@@ -45,11 +45,16 @@ bool RightMouseReleased = false;
 
 string? ActiveElementId = null;
 string? FocusedItemId = null;
+float ItemScale = 1.2f; // Default slightly bigger as requested
+float ScrollOffsetY = 0;
+float TotalContentHeight = 0;
+
 Queue<Action> ActionQueue = new();
 
 // State bools
 bool didInitialLayout = false;
 bool SummonCalled = false;
+ViewMode CurrentViewMode = ViewMode.All;
 
 //Storage
 StorageService storageService = new StorageService();
@@ -141,7 +146,14 @@ void WindowOnLoad()
         WindowInput.Keyboards[i].KeyDown += KeyDown;
         WindowInput.Keyboards[i].KeyChar += KeyChar;
     }
-    
+
+    for (int i = 0; i < WindowInput.Mice.Count; i++)
+    {
+        WindowInput.Mice[i].Scroll += (mouse, scroll) =>
+        {
+            ScrollOffsetY -= scroll.Y * 40;
+        };
+    }
 }
 
 
@@ -360,10 +372,40 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
     };
     
     const string DockText = "Docked Items";
+    string title = CurrentViewMode == ViewMode.All ? "All Items" : "Grouped Items";
 
-    canvas.DrawText(DockText, panelRect.Left + 32, panelRect.Top + 48, titleFont, titlePaint);
+    canvas.DrawText(title, panelRect.Left + 32, panelRect.Top + 48, titleFont, titlePaint);
 
-    DrawDockItems(canvas, panelRect);
+    // Items Viewport
+    var viewportRect = new SKRect(
+        panelRect.Left,
+        panelRect.Top + 60,
+        panelRect.Right,
+        panelRect.Bottom - 80);
+
+    // Clamp scroll
+    float maxScroll = Math.Max(0, TotalContentHeight - viewportRect.Bottom);
+    ScrollOffsetY = Math.Clamp(ScrollOffsetY, 0, maxScroll);
+
+    canvas.Save();
+    canvas.ClipRect(viewportRect);
+    canvas.Translate(0, -ScrollOffsetY);
+
+    var originalMousePos = MousePosition;
+    if (viewportRect.Contains(originalMousePos.X, originalMousePos.Y))
+    {
+        MousePosition = new Vector2(originalMousePos.X, originalMousePos.Y + ScrollOffsetY);
+    }
+    else
+    {
+        // Move mouse away so items don't hover
+        MousePosition = new Vector2(-10000, -10000);
+    }
+
+    TotalContentHeight = DrawDockItems(canvas, panelRect);
+
+    MousePosition = originalMousePos;
+    canvas.Restore();
     
     // Footer
     using var footerPaint = new SKPaint
@@ -379,6 +421,31 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
         panelRect.Bottom - 16);
 
     canvas.DrawRoundRect(footerRect, 16, 16, footerPaint);
+
+    // View Mode Toggle
+    var modeBtnRect = new SKRect(footerRect.Left + 12, footerRect.Top + 12, footerRect.Left + 120, footerRect.Bottom - 12);
+    if (TextButton(canvas, modeBtnRect, CurrentViewMode == ViewMode.All ? "Mode: All" : "Mode: Grouped", "view-mode-btn"))
+    {
+        CurrentViewMode = CurrentViewMode == ViewMode.All ? ViewMode.Grouped : ViewMode.All;
+    }
+
+    // Scale Controls
+    var scaleLabelRect = new SKRect(modeBtnRect.Right + 12, footerRect.Top, modeBtnRect.Right + 80, footerRect.Bottom);
+    using var labelPaint = new SKPaint { IsAntialias = true, Color = SKColors.DimGray };
+    using var labelFont = new SKFont { Size = 12, Typeface = SKTypeface.FromFamilyName("Segoe UI") };
+    canvas.DrawText($"Size: {(int)(ItemScale * 100)}%", scaleLabelRect.Left, footerRect.MidY + 5, labelFont, labelPaint);
+
+    var minusBtnRect = new SKRect(scaleLabelRect.Right, footerRect.Top + 12, scaleLabelRect.Right + 32, footerRect.Bottom - 12);
+    if (TextButton(canvas, minusBtnRect, "-", "scale-minus-btn"))
+    {
+        ItemScale = Math.Max(0.5f, ItemScale - 0.1f);
+    }
+
+    var plusBtnRect = new SKRect(minusBtnRect.Right + 4, footerRect.Top + 12, minusBtnRect.Right + 36, footerRect.Bottom - 12);
+    if (TextButton(canvas, plusBtnRect, "+", "scale-plus-btn"))
+    {
+        ItemScale = Math.Min(3.0f, ItemScale + 0.1f);
+    }
     
     var addButtonRect = new SKRect(
         footerRect.Right - 56,
@@ -450,24 +517,60 @@ void DrawDock(SKCanvas canvas, SKRect panelRect)
     }
 }
 
-void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
+float DrawDockItems(SKCanvas canvas, SKRect dockPanel)
+{
+    float currentY = 72;
+    if (CurrentViewMode == ViewMode.All)
+    {
+        currentY += DrawItemsList(canvas, dockPanel, DockItems.Select((item, index) => (item, index)).ToList(), currentY);
+    }
+    else
+    {
+        var groups = DockItems.Select((item, index) => (item, index))
+            .GroupBy(x => x.item.Type)
+            .OrderBy(g => g.Key);
+        
+        foreach (var group in groups)
+        {
+            string groupName = group.Key switch
+            {
+                ItemType.File => "Files",
+                ItemType.Note => "Notes",
+                ItemType.TaskList => "Task Lists",
+                _ => group.Key.ToString()
+            };
+
+            using var groupTitlePaint = new SKPaint { IsAntialias = true, Color = SKColors.DimGray };
+            using var groupTitleFont = new SKFont { Size = 14, Typeface = SKTypeface.FromFamilyName("Segoe UI Semibold") };
+            
+            canvas.DrawText(groupName, dockPanel.Left + 32, dockPanel.Top + currentY + 20, groupTitleFont, groupTitlePaint);
+            currentY += 30;
+
+            currentY += DrawItemsList(canvas, dockPanel, group.ToList(), currentY);
+            currentY += 20;
+        }
+    }
+    return currentY + dockPanel.Top;
+}
+
+float DrawItemsList(SKCanvas canvas, SKRect dockPanel, List<(StorageService.DockItem item, int originalIndex)> items, float startY)
 {
     const float paddingX = 32;
-    const float startY = 72;
-    const float cellSize = 72;
-    const float cardSize = 56;
-    var itemCount = DockItems.Count();
+    float baseCellSize = 80;
+    float cellSize = baseCellSize * ItemScale;
+    float cardSize = (baseCellSize - 16) * ItemScale;
 
     float availableWidth = dockPanel.Width - paddingX * 2;
     int columns = Math.Max(1, (int)Math.Floor(availableWidth / cellSize));
+    int rows = (int)Math.Ceiling((float)items.Count / columns);
 
     bool anyHovered = false;
 
-    for (int index = 0; index < itemCount; index++)
+    for (int i = 0; i < items.Count; i++)
     {
-        StorageService.DockItem item = DockItems[index];
-        int row = index / columns;
-        int column = index % columns;
+        var (item, originalIndex) = items[i];
+        int row = i / columns;
+        int column = i % columns;
 
         float x = dockPanel.Left + paddingX + column * cellSize;
         float y = dockPanel.Top + startY + row * cellSize;
@@ -475,20 +578,20 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
         var cardRect = new SKRect(x, y, x + cardSize, y + cardSize);
         if (cardRect.Contains(MousePosition.X, MousePosition.Y)) anyHovered = true;
 
-        string itemId = $"dock-item-{index}";
+        string stableId = $"dock-item-{originalIndex}";
         bool rightClicked = false;
         bool clicked = false;
 
         switch (item.Type)
         {
             case ItemType.File:
-                clicked = DockItemButton(canvas, cardRect, item, itemId, out rightClicked);
+                clicked = DockItemButton(canvas, cardRect, item, stableId, out rightClicked);
                 break;
             case ItemType.Note:
-                clicked = NoteDockItem(canvas, cardRect, item, itemId, out rightClicked);
+                clicked = NoteDockItem(canvas, cardRect, item, stableId, out rightClicked);
                 break;
             case ItemType.TaskList:
-                clicked = TaskListDockItem(canvas, cardRect, item, itemId, out rightClicked);
+                clicked = TaskListDockItem(canvas, cardRect, item, stableId, out rightClicked);
                 break;
         }
 
@@ -500,14 +603,14 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
             }
             else
             {
-                FocusedItemId = itemId;
+                FocusedItemId = stableId;
             }
         }
 
         if (rightClicked)
         {
             IsContextMenuOpen = true;
-            ContextMenuItemIndex = index;
+            ContextMenuItemIndex = originalIndex;
             ContextMenuPosition = MousePosition;
             IsAddMenuOpen = false;
         }
@@ -515,8 +618,13 @@ void DrawDockItems(SKCanvas canvas, SKRect dockPanel)
 
     if (LeftMouseReleased && !anyHovered && !IsAddMenuOpen && !ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
     {
-        FocusedItemId = null;
+        if (dockPanel.Contains(MousePosition.X, MousePosition.Y))
+        {
+            FocusedItemId = null;
+        }
     }
+
+    return rows * cellSize;
 }
 
 bool NoteDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
@@ -539,17 +647,19 @@ bool NoteDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, st
     if (pressed) bgColor = new SKColor(240, 240, 160);
 
     using var paint = new SKPaint { IsAntialias = true, Color = bgColor };
-    canvas.DrawRoundRect(rect, 4, 4, paint);
+    float radius = 4 * ItemScale;
+    canvas.DrawRoundRect(rect, radius, radius, paint);
 
     var note = GetNote(item.Value);
-    using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 10 };
-    var textRect = new SKRect(rect.Left + 4, rect.Top + 4, rect.Right - 4, rect.Bottom - 4);
+    using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 11 * ItemScale };
+    var textPadding = 6 * ItemScale;
+    var textRect = new SKRect(rect.Left + textPadding, rect.Top + textPadding, rect.Right - textPadding, rect.Bottom - textPadding);
     DrawTextInRect(canvas, note.Content, textRect, textPaint);
 
     if (focused)
     {
-        using var borderPaint = new SKPaint { IsAntialias = true, Color = new SKColor(255, 165, 0), Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
-        canvas.DrawRoundRect(rect, 4, 4, borderPaint);
+        using var borderPaint = new SKPaint { IsAntialias = true, Color = new SKColor(255, 165, 0), Style = SKPaintStyle.Stroke, StrokeWidth = 2 * ItemScale };
+        canvas.DrawRoundRect(rect, radius, radius, borderPaint);
     }
 
     if (active && (LeftMouseReleased || RightMouseReleased)) ActiveElementId = null;
@@ -576,19 +686,23 @@ bool TaskListDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item
     if (pressed) bgColor = new SKColor(220, 220, 220);
 
     using var paint = new SKPaint { IsAntialias = true, Color = bgColor };
-    canvas.DrawRoundRect(rect, 4, 4, paint);
+    float radius = 4 * ItemScale;
+    canvas.DrawRoundRect(rect, radius, radius, paint);
 
     var list = GetTaskList(item.Value);
-    using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 9 };
+    using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 10 * ItemScale };
     
-    float itemHeight = 12;
+    float itemHeight = 14 * ItemScale;
+    float circleSize = 10 * ItemScale;
+    float padding = 6 * ItemScale;
+
     for (int i = 0; i < list.Tasks.Count; i++)
     {
         var task = list.Tasks[i];
-        float ty = rect.Top + 6 + i * itemHeight;
+        float ty = rect.Top + padding + i * itemHeight;
         if (ty + itemHeight > rect.Bottom) break;
 
-        var circleRect = new SKRect(rect.Left + 4, ty, rect.Left + 4 + 8, ty + 8);
+        var circleRect = new SKRect(rect.Left + padding, ty + (itemHeight - circleSize)/2, rect.Left + padding + circleSize, ty + (itemHeight + circleSize)/2);
         
         if (LeftMousePressed && circleRect.Contains(MousePosition.X, MousePosition.Y))
         {
@@ -598,23 +712,23 @@ bool TaskListDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item
             storageService.SaveTaskList(list);
         }
 
-        using var circlePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, Color = SKColors.Gray, StrokeWidth = 1 };
+        using var circlePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, Color = SKColors.Gray, StrokeWidth = 1 * ItemScale };
         canvas.DrawOval(circleRect, circlePaint);
         
         if (task.IsCompleted)
         {
             using var checkPaint = new SKPaint { IsAntialias = true, Color = SKColors.Green, Style = SKPaintStyle.Fill };
-            circleRect.Inflate(-1, -1);
+            circleRect.Inflate(-1 * ItemScale, -1 * ItemScale);
             canvas.DrawOval(circleRect, checkPaint);
         }
 
-        canvas.DrawText(task.Text, rect.Left + 16, ty + 7, textPaint);
+        canvas.DrawText(task.Text, rect.Left + padding + circleSize + 6 * ItemScale, ty + itemHeight * 0.75f, textPaint);
     }
 
     if (focused)
     {
-        using var borderPaint = new SKPaint { IsAntialias = true, Color = SKColors.DodgerBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
-        canvas.DrawRoundRect(rect, 4, 4, borderPaint);
+        using var borderPaint = new SKPaint { IsAntialias = true, Color = SKColors.DodgerBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 2 * ItemScale };
+        canvas.DrawRoundRect(rect, radius, radius, borderPaint);
     }
 
     if (active && (LeftMouseReleased || RightMouseReleased)) ActiveElementId = null;
@@ -625,31 +739,38 @@ void DrawTextInRect(SKCanvas canvas, string text, SKRect rect, SKPaint paint)
 {
     if (string.IsNullOrEmpty(text)) return;
     
-    var words = text.Split(' ');
-    var line = "";
-    var x = rect.Left;
-    var y = rect.Top + paint.TextSize;
+    var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+    float y = rect.Top + paint.TextSize;
+    float lineHeight = paint.TextSize + 2;
     
-    foreach (var word in words)
+    foreach (var rawLine in lines)
     {
-        var testLine = line + (line == "" ? "" : " ") + word;
-        if (paint.MeasureText(testLine) > rect.Width && line != "")
+        if (y > rect.Bottom) break;
+
+        var words = rawLine.Split(' ');
+        var currentLine = "";
+        
+        foreach (var word in words)
         {
-            canvas.DrawText(line, x, y, paint);
-            line = word;
-            y += paint.TextSize + 2;
-        }
-        else
-        {
-            line = testLine;
+            var testLine = currentLine == "" ? word : currentLine + " " + word;
+            if (paint.MeasureText(testLine) > rect.Width && currentLine != "")
+            {
+                canvas.DrawText(currentLine, rect.Left, y, paint);
+                y += lineHeight;
+                currentLine = word;
+            }
+            else
+            {
+                currentLine = testLine;
+            }
+            if (y > rect.Bottom) break;
         }
         
-        if (y > rect.Bottom) break;
-    }
-    
-    if (y <= rect.Bottom)
-    {
-        canvas.DrawText(line, x, y, paint);
+        if (y <= rect.Bottom)
+        {
+            canvas.DrawText(currentLine, rect.Left, y, paint);
+            y += lineHeight;
+        }
     }
 }
 
@@ -667,6 +788,53 @@ StorageService.TaskList GetTaskList(string id)
     list = storageService.LoadTaskList(id);
     _taskListCache[id] = list;
     return list;
+}
+
+bool TextButton(SKCanvas canvas, SKRect rect, string text, string id)
+{
+    bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+
+    if (hovered && LeftMousePressed)
+    {
+        ActiveElementId = id;
+    }
+
+    bool active = ActiveElementId == id;
+    bool pressed = active && LeftMouseDown;
+    bool clicked = active && hovered && LeftMouseReleased;
+
+    var color = pressed
+        ? new SKColor(180, 180, 180, 255)
+        : hovered
+            ? new SKColor(220, 220, 220, 255)
+            : new SKColor(200, 200, 200, 255);
+
+    using var buttonPaint = new SKPaint
+    {
+        IsAntialias = true,
+        Color = color
+    };
+
+    canvas.DrawRoundRect(rect, 8, 8, buttonPaint);
+
+    using var textPaint = new SKPaint
+    {
+        IsAntialias = true,
+        Color = SKColors.Black,
+        TextSize = 13,
+        Typeface = SKTypeface.FromFamilyName("Segoe UI")
+    };
+
+    var textWidth = textPaint.MeasureText(text);
+    
+    canvas.DrawText(text, rect.MidX - textWidth / 2, rect.MidY + 5, textPaint);
+
+    if (active && (LeftMouseReleased || RightMouseReleased))
+    {
+        ActiveElementId = null;
+    }
+
+    return clicked;
 }
 
 bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
@@ -696,14 +864,15 @@ bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, 
         Color = cardColor
     };
 
-    canvas.DrawRoundRect(rect, 12, 12, cardPaint);
+    float radius = 12 * ItemScale;
+    canvas.DrawRoundRect(rect, radius, radius, cardPaint);
 
     SKImage? icon = GetDockItemIcon(item.Value);
 
     if (icon is not null)
     {
         // icon rect is inner rect with small padding
-        var iconPadding = 1;
+        var iconPadding = 1 * ItemScale;
         SKRect iconRect = new SKRect(
             rect.Left + iconPadding,
             rect.Top + iconPadding,
@@ -1406,4 +1575,8 @@ static unsafe Tuple<string,string>? OpenFilePicker(HWND owner)
     //     return (HRESULT)(int)(0x80070000u | (uint)error);
     // }
 }
+
+
+enum ViewMode { All, Grouped }
+
 #endregion
