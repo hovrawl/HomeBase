@@ -17,13 +17,15 @@ internal static unsafe class TrayIcon
     private const uint WM_NULL = 0x0000;
 
     private const uint QuitMenuId = 1001;
+    private const uint AboutMenuId = 1002;
 
     private static NOTIFYICONDATAW _data;
     private static HWND _hwnd;
     private static Action? _onQuit;
+    private static Action? _onAbout;
     private static nint _oldWndProc;
 
-    public static void Add(HWND hwnd, Action onQuit)
+    public static void Add(HWND hwnd, Action onQuit, Action onAbout)
     {
         if (hwnd == HWND.Null)
         {
@@ -32,6 +34,7 @@ internal static unsafe class TrayIcon
 
         _hwnd = hwnd;
         _onQuit = onQuit;
+        _onAbout = onAbout;
 
         SubclassWindow(hwnd);
 
@@ -95,6 +98,7 @@ internal static unsafe class TrayIcon
 
         _hwnd = HWND.Null;
         _onQuit = null;
+        _onAbout = null;
     }
 
     private static void SubclassWindow(HWND hwnd)
@@ -164,14 +168,20 @@ internal static unsafe class TrayIcon
 
         try
         {
-            fixed (char* menuItemText = "Quit")
+            fixed (char* aboutText = "About")
+            fixed (char* quitText = "Quit")
             {
-                
+                _ = PInvoke.AppendMenu(
+                    menu,
+                    MENU_ITEM_FLAGS.MF_STRING,
+                    AboutMenuId,
+                    aboutText);
+
                 _ = PInvoke.AppendMenu(
                     menu,
                     MENU_ITEM_FLAGS.MF_STRING,
                     QuitMenuId,
-                    menuItemText);
+                    quitText);
             }
 
             if (!PInvoke.GetCursorPos(out Point cursorPosition))
@@ -196,6 +206,10 @@ internal static unsafe class TrayIcon
             if (selectedCommand == QuitMenuId)
             {
                 _onQuit?.Invoke();
+            }
+            else if (selectedCommand == AboutMenuId)
+            {
+                _onAbout?.Invoke();
             }
 
             // Recommended after TrackPopupMenu when using a notification icon.

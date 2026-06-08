@@ -116,7 +116,7 @@ if (window.Native?.Win32 is { } win32Window)
     TrayIcon.Add(hwnd, () =>
     {
         window.Close();
-    });
+    }, () => ActionQueue.Enqueue(AboutWindow.Show));
 }
 
 // Setup skia
