@@ -35,4 +35,8 @@
     <ItemGroup>
         <AdditionalFiles Include="NativeMethods.txt" />
     </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Models\" />
+    </ItemGroup>
 </Project>

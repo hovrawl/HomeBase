@@ -12,6 +12,10 @@ public class StorageService
     private readonly string _notesPath;
     private readonly string _taskListsPath;
 
+    
+    Dictionary<string, Note> _noteCache = new();
+    Dictionary<string, TaskList> _taskListCache = new();
+    
     public static StorageService Instance => _instance;
 
     internal StorageService()
