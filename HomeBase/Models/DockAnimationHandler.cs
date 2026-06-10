@@ -3,7 +3,7 @@ using Silk.NET.Maths;
 
 namespace HomeBase.Models;
 
-public sealed class UIAnimation
+public sealed class DockWindowAnimation
 {
     public UIAnimationState State { get; private set; } = UIAnimationState.Hidden;
 

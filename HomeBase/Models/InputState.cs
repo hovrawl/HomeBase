@@ -1,10 +1,11 @@
-﻿using System.Numerics;
+
+using Silk.NET.Maths;
 
 namespace HomeBase.Models;
 
-public sealed class InputState
+public struct InputState
 {
-    public Vector2 MousePosition { get; set; }
+    public Vector2D<int> MousePosition { get; set; }
 
     public bool LeftMouseDown { get; set; }
     public bool LeftMousePressed { get; set; }
@@ -14,5 +15,19 @@ public sealed class InputState
     public bool RightMousePressed { get; set; }
     public bool RightMouseReleased { get; set; }
 
-    public string? ActiveElementId { get; set; }
+    public void UpdateMouse(Vector2D<int> mousePosition, bool leftDown, bool rightDown)
+    {
+        bool previousLeftMouseDown = LeftMouseDown;
+        bool previousRightMouseDown = RightMouseDown;
+
+        MousePosition = mousePosition;
+
+        LeftMouseDown = leftDown;
+        LeftMousePressed = leftDown && !previousLeftMouseDown;
+        LeftMouseReleased = !leftDown && previousLeftMouseDown;
+
+        RightMouseDown = rightDown;
+        RightMousePressed = rightDown && !previousRightMouseDown;
+        RightMouseReleased = !rightDown && previousRightMouseDown;
+    }
 }

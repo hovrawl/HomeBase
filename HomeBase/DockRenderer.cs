@@ -1,33 +1,39 @@
 ﻿using System.Collections.Concurrent;
-using System.Numerics;
 using HomeBase.Models;
+using HomeBase.Render;
+using Silk.NET.Maths;
 using SkiaSharp;
 
 namespace HomeBase;
 
 public sealed class DockRenderer
 {
-    private readonly UIState _state;
-    private readonly InputState _input;
-    private readonly StorageService _storage;
-    private readonly ConcurrentQueue<Action> _actions;
+    private UIState _ui;
+    private InputState _input;
+    private readonly DockModel _model;
+    private readonly ConcurrentQueue<Action> _actionQueue;
 
     public DockRenderer(
-        UIState state,
+        UIState ui,
         InputState input,
-        StorageService storage,
-        ConcurrentQueue<Action> actions)
+        DockModel model,
+        ConcurrentQueue<Action> actionQueue)
     {
-        _state = state;
+        _ui = ui;
         _input = input;
-        _storage = storage;
-        _actions = actions;
+        _model = model;
+        _actionQueue = actionQueue;
     }
 
     public void Render(SKCanvas canvas)
     {
+        // Clear canvas with transparent background
+        canvas.Clear(SKColors.Transparent);
+        
         SKRect panelRect = DrawBackground(canvas);
         DrawDock(canvas, panelRect);
+
+        canvas.Flush();
     }
 
 
@@ -47,7 +53,7 @@ public sealed class DockRenderer
             Color = new SKColor(242, 242, 242, 232)
         };
 
-        float radius = LogicalToFramebufferPixels(12);
+        float radius = HomeBase.Render.Helpers.LogicalToFramebufferPixels(_ui.BufferScale, 12);
         canvas.DrawRoundRect(panelRect, radius, radius, panelPaint);
 
         using var borderPaint = new SKPaint
@@ -89,27 +95,27 @@ public sealed class DockRenderer
             panelRect.Bottom - 80);
 
         // Clamp scroll
-        float maxScroll = Math.Max(0, TotalContentHeight - viewportRect.Bottom);
-        ScrollOffsetY = Math.Clamp(ScrollOffsetY, 0, maxScroll);
+        float maxScroll = Math.Max(0, _ui.TotalContentHeight - viewportRect.Bottom);
+        _ui.ScrollOffsetY = Math.Clamp(_ui.ScrollOffsetY, 0, maxScroll);
 
         canvas.Save();
         canvas.ClipRect(viewportRect);
-        canvas.Translate(0, -ScrollOffsetY);
+        canvas.Translate(0, -_ui.ScrollOffsetY);
 
-        var originalMousePos = MousePosition;
+        var originalMousePos = _input.MousePosition;
         if (viewportRect.Contains(originalMousePos.X, originalMousePos.Y))
         {
-            MousePosition = new Vector2(originalMousePos.X, originalMousePos.Y + ScrollOffsetY);
+            _input.MousePosition = new Vector2D<int>(originalMousePos.X, originalMousePos.Y + (int)_ui.ScrollOffsetY);
         }
         else
         {
             // Move mouse away so items don't hover
-            MousePosition = new Vector2(-10000, -10000);
+            _input.MousePosition = new Vector2D<int>(-10000, -10000);
         }
 
-        TotalContentHeight = DrawDockItems(canvas, panelRect);
+        _ui.TotalContentHeight = DrawDockItems(canvas, panelRect);
 
-        MousePosition = originalMousePos;
+        _input.MousePosition = originalMousePos;
         canvas.Restore();
         
         // Footer
@@ -129,27 +135,27 @@ public sealed class DockRenderer
 
         // View Mode Toggle
         var modeBtnRect = new SKRect(footerRect.Left + 12, footerRect.Top + 12, footerRect.Left + 120, footerRect.Bottom - 12);
-        if (TextButton(canvas, modeBtnRect, CurrentViewMode == ViewMode.All ? "Mode: All" : "Mode: Grouped", "view-mode-btn"))
+        if (TextButton(canvas, modeBtnRect, _ui.CurrentViewMode == ViewMode.All ? "Mode: All" : "Mode: Grouped", "view-mode-btn"))
         {
-            CurrentViewMode = CurrentViewMode == ViewMode.All ? ViewMode.Grouped : ViewMode.All;
+            _ui.CurrentViewMode = _ui.CurrentViewMode == ViewMode.All ? ViewMode.Grouped : ViewMode.All;
         }
 
         // Scale Controls
         var scaleLabelRect = new SKRect(modeBtnRect.Right + 12, footerRect.Top, modeBtnRect.Right + 80, footerRect.Bottom);
         using var labelPaint = new SKPaint { IsAntialias = true, Color = SKColors.DimGray };
         using var labelFont = new SKFont { Size = 12, Typeface = SKTypeface.FromFamilyName("Segoe UI") };
-        canvas.DrawText($"Size: {(int)(ItemScale * 100)}%", scaleLabelRect.Left, footerRect.MidY + 5, labelFont, labelPaint);
+        canvas.DrawText($"Size: {(int)(_ui.ItemScale * 100)}%", scaleLabelRect.Left, footerRect.MidY + 5, labelFont, labelPaint);
 
         var minusBtnRect = new SKRect(scaleLabelRect.Right, footerRect.Top + 12, scaleLabelRect.Right + 32, footerRect.Bottom - 12);
         if (TextButton(canvas, minusBtnRect, "-", "scale-minus-btn"))
         {
-            ItemScale = Math.Max(0.5f, ItemScale - 0.1f);
+            _ui.ItemScale = Math.Max(0.5f, _ui.ItemScale - 0.1f);
         }
 
         var plusBtnRect = new SKRect(minusBtnRect.Right + 4, footerRect.Top + 12, minusBtnRect.Right + 36, footerRect.Bottom - 12);
         if (TextButton(canvas, plusBtnRect, "+", "scale-plus-btn"))
         {
-            ItemScale = Math.Min(3.0f, ItemScale + 0.1f);
+            _ui.ItemScale = Math.Min(3.0f, _ui.ItemScale + 0.1f);
         }
         
         var addButtonRect = new SKRect(
@@ -161,70 +167,70 @@ public sealed class DockRenderer
         var addClicked = AddButton(canvas, addButtonRect, "add-item");
         if (addClicked)
         {
-            IsAddMenuOpen = !IsAddMenuOpen;
+            _ui.IsAddMenuOpen = !_ui.IsAddMenuOpen;
         }
 
-        AddMenuRect = GetAddMenuRect(addButtonRect);
+        _ui.AddMenuRect = GetAddMenuRect(addButtonRect);
 
         // Extra hit test to hide menu if we clicked elsewhere
-        if (LeftMouseReleased && !addClicked)
+        if (_input.LeftMouseReleased && !addClicked)
         {
-            if (IsAddMenuOpen && !AddMenuRect.Contains(MousePosition.X, MousePosition.Y))
+            if (_ui.IsAddMenuOpen && !_ui.AddMenuRect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
             {
-                IsAddMenuOpen = false;
-                ActiveElementId = null;
+                _ui.IsAddMenuOpen = false;
+                _ui.ActiveElementId = null;
             }
         }
 
         // Ensure we have the context menu rect
-        ContextMenuRect = GetContextMenuRect(ContextMenuPosition);
+        _ui.ContextMenuRect = GetContextMenuRect(_ui.ContextMenuPosition);
 
         // Extra hit test to hide context menu if we clicked elsewhere
-        if (IsContextMenuOpen &&
-            (LeftMouseReleased || RightMouseReleased) &&
-            !ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
+        if (_ui.IsContextMenuOpen &&
+            (_input.LeftMouseReleased || _input.RightMouseReleased) &&
+            !_ui.ContextMenuRect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
         {
-            IsContextMenuOpen = false;
-            ActiveElementId = null;
+            _ui.IsContextMenuOpen = false;
+            _ui.ActiveElementId = null;
         }
         
-        if (IsAddMenuOpen)
+        if (_ui.IsAddMenuOpen)
         {
             string? selectedAddMenuItem = DrawAddMenu(canvas, addButtonRect);
 
             if (selectedAddMenuItem == "Item")
             {
-                IsAddMenuOpen = false;
-                ActionQueue.Enqueue(OpenAddItemDialog);
+                _ui.IsAddMenuOpen = false;
+                _actionQueue.Enqueue(AppAction.OpenAddItemDialog);
             }
             else if (selectedAddMenuItem == "Note")
             {
-                IsAddMenuOpen = false;
-                ActionQueue.Enqueue(CreateNote);
+                _ui.IsAddMenuOpen = false;
+                _actionQueue.Enqueue(AppAction.CreateNote);
             }
             else if (selectedAddMenuItem == "TaskList")
             {
-                IsAddMenuOpen = false;
-                ActionQueue.Enqueue(CreateTaskList);
+                _ui.IsAddMenuOpen = false;
+                _actionQueue.Enqueue(AppAction.CreateTaskList);
             }    
         }
 
-        if (IsContextMenuOpen)
+        if (_ui.IsContextMenuOpen)
         {
             string? selectedContextAction = DrawContextMenu(canvas);
 
             if (selectedContextAction == "Remove")
             {
-                IsContextMenuOpen = false;
-                int indexToRemove = ContextMenuItemIndex;
-                ActionQueue.Enqueue(() => RemoveDockItem(indexToRemove));
+                _ui.IsContextMenuOpen = false;
+                int indexToRemove = _ui.ContextMenuItemIndex;
+                _actionQueue.Enqueue(() => AppAction.RemoveDockItem(indexToRemove));
             }
             else if (selectedContextAction == "Rename")
             {
-                IsContextMenuOpen = false;
-                int indexToRename = ContextMenuItemIndex;
-                RenamingItemId = $"dock-item-{indexToRename}";
-                RenamingCaretIndex = DockItems[indexToRename].Name.Length;
+                _ui.IsContextMenuOpen = false;
+                int indexToRename = _ui.ContextMenuItemIndex;
+                _ui.RenamingItemId = $"dock-item-{indexToRename}";
+                _ui.RenamingCaretIndex = DockItems[indexToRename].Name.Length;
             }
         }
     }
@@ -232,7 +238,7 @@ public sealed class DockRenderer
     float DrawDockItems(SKCanvas canvas, SKRect dockPanel)
     {
         float currentY = 16;
-        if (CurrentViewMode == ViewMode.All)
+        if (_ui.CurrentViewMode == ViewMode.All)
         {
             using var groupTitlePaint = new SKPaint { IsAntialias = true, Color = SKColors.DimGray };
             using var groupTitleFont = new SKFont { Size = 14, Typeface = SKTypeface.FromFamilyName("Segoe UI Semibold") };
@@ -275,10 +281,10 @@ public sealed class DockRenderer
     {
         const float paddingX = 32;
         float baseCellSize = 80;
-        float cellWidth = baseCellSize * ItemScale;
-        float labelHeight = 20 * ItemScale;
+        float cellWidth = baseCellSize * _ui.ItemScale;
+        float labelHeight = 20 * _ui.ItemScale;
         float cellHeight = cellWidth + labelHeight;
-        float cardSize = (baseCellSize - 16) * ItemScale;
+        float cardSize = (baseCellSize - 16) * _ui.ItemScale;
 
         float availableWidth = dockPanel.Width - paddingX * 2;
         int columns = Math.Max(1, (int)Math.Floor(availableWidth / cellWidth));
@@ -296,7 +302,7 @@ public sealed class DockRenderer
             float y = dockPanel.Top + startY + row * cellHeight;
 
             var cardRect = new SKRect(x, y, x + cardSize, y + cardSize);
-            if (cardRect.Contains(MousePosition.X, MousePosition.Y)) anyHovered = true;
+            if (cardRect.Contains(_input.MousePosition.X, _input.MousePosition.Y)) anyHovered = true;
 
             string stableId = $"dock-item-{originalIndex}";
             bool rightClicked = false;
@@ -315,35 +321,35 @@ public sealed class DockRenderer
                     break;
             }
 
-            var labelRect = new SKRect(x, y + cardSize + 2 * ItemScale, x + cardSize, y + cardSize + labelHeight);
-            if (labelRect.Contains(MousePosition.X, MousePosition.Y)) anyHovered = true;
+            var labelRect = new SKRect(x, y + cardSize + 2 * _ui.ItemScale, x + cardSize, y + cardSize + labelHeight);
+            if (labelRect.Contains(_input.MousePosition.X, _input.MousePosition.Y)) anyHovered = true;
             DrawItemLabel(canvas, labelRect, item, stableId);
 
             if (clicked)
             {
-                if (RenamingItemId != null && RenamingItemId != stableId)
+                if (_ui.RenamingItemId != null && _ui.RenamingItemId != stableId)
                 {
                     SaveRenaming();
                 }
 
                 if (item.Type == ItemType.File)
                 {
-                    ActionQueue.Enqueue(() => OnDockItemClicked(item));
+                    _actionQueue.Enqueue(() => OnDockItemClicked(item));
                 }
                 else
                 {
-                    if (FocusedItemId != stableId)
+                    if (_ui.FocusedItemId != stableId)
                     {
-                        FocusedItemId = stableId;
+                        _ui.FocusedItemId = stableId;
                         if (item.Type == ItemType.Note)
                         {
-                            CaretIndex = GetNote(item.Value).Content.Length;
+                            _ui.CaretIndex = GetNote(item.Value).Content.Length;
                         }
                         else if (item.Type == ItemType.TaskList)
                         {
                             var list = GetTaskList(item.Value);
-                            FocusedTaskListIndex = list.Tasks.Count - 1;
-                            CaretIndex = FocusedTaskListIndex >= 0 ? list.Tasks[FocusedTaskListIndex].Text.Length : 0;
+                            _ui.FocusedTaskListIndex = list.Tasks.Count - 1;
+                            _ui.CaretIndex = _ui.FocusedTaskListIndex >= 0 ? list.Tasks[_ui.FocusedTaskListIndex].Text.Length : 0;
                         }
                     }
                 }
@@ -351,21 +357,21 @@ public sealed class DockRenderer
 
             if (rightClicked)
             {
-                if (RenamingItemId != null) SaveRenaming();
+                if (_ui.RenamingItemId != null) SaveRenaming();
                 
-                IsContextMenuOpen = true;
-                ContextMenuItemIndex = originalIndex;
-                ContextMenuPosition = MousePosition;
-                IsAddMenuOpen = false;
+                _ui.IsContextMenuOpen = true;
+                _ui.ContextMenuItemIndex = originalIndex;
+                _ui. ContextMenuPosition = _input.MousePosition;
+                _ui.IsAddMenuOpen = false;
             }
         }
 
-        if (LeftMouseReleased && !anyHovered && !IsAddMenuOpen && !ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
+        if (_input.LeftMouseReleased && !anyHovered && !_ui.IsAddMenuOpen && !_ui.ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
         {
-            if (dockPanel.Contains(MousePosition.X, MousePosition.Y))
+            if (dockPanel.Contains(_input.MousePosition.X, _input.MousePosition.Y))
             {
-                FocusedItemId = null;
-                if (RenamingItemId != null) SaveRenaming();
+                _ui.FocusedItemId = null;
+                if (_ui.RenamingItemId != null) SaveRenaming();
             }
         }
 
@@ -374,14 +380,14 @@ public sealed class DockRenderer
 
     void DrawItemLabel(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id)
     {
-        bool isRenaming = RenamingItemId == id;
+        bool isRenaming = _ui.RenamingItemId == id;
         string text = item.Name;
         
         using var paint = new SKPaint 
         { 
             IsAntialias = true, 
             Color = SKColors.Black, 
-            TextSize = 11 * ItemScale,
+            TextSize = 11 * _ui.ItemScale,
             Typeface = SKTypeface.FromFamilyName("Segoe UI")
         };
 
@@ -389,23 +395,23 @@ public sealed class DockRenderer
         {
             // Draw background for editing
             using var bgPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-            canvas.DrawRoundRect(rect, 4 * ItemScale, 4 * ItemScale, bgPaint);
-            using var borderPaint = new SKPaint { Color = SKColors.DodgerBlue, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1 * ItemScale };
-            canvas.DrawRoundRect(rect, 4 * ItemScale, 4 * ItemScale, borderPaint);
+            canvas.DrawRoundRect(rect, 4 * _ui.ItemScale, 4 * _ui.ItemScale, bgPaint);
+            using var borderPaint = new SKPaint { Color = SKColors.DodgerBlue, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1 * _ui.ItemScale };
+            canvas.DrawRoundRect(rect, 4 * _ui.ItemScale, 4 * _ui.ItemScale, borderPaint);
 
-            float textX = rect.Left + 4 * ItemScale;
+            float textX = rect.Left + 4 * _ui.ItemScale;
             float textY = rect.MidY + paint.TextSize / 3;
             canvas.DrawText(text, textX, textY, paint);
 
             // Draw caret
-            float caretX = textX + paint.MeasureText(text.Substring(0, Math.Clamp(RenamingCaretIndex, 0, text.Length)));
-            using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
-            canvas.DrawLine(caretX, rect.Top + 4 * ItemScale, caretX, rect.Bottom - 4 * ItemScale, caretPaint);
+            float caretX = textX + paint.MeasureText(text.Substring(0, Math.Clamp(_ui.RenamingCaretIndex, 0, text.Length)));
+            using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * _ui.ItemScale };
+            canvas.DrawLine(caretX, rect.Top + 4 * _ui.ItemScale, caretX, rect.Bottom - 4 * _ui.ItemScale, caretPaint);
 
             // Handle click to move caret
-            if (LeftMousePressed && rect.Contains(MousePosition.X, MousePosition.Y))
+            if (_input.LeftMousePressed && rect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
             {
-                float localX = MousePosition.X - textX;
+                float localX = _input.MousePosition.X - textX;
                 int bestIdx = 0;
                 float minDist = float.MaxValue;
                 for (int j = 0; j <= text.Length; j++)
@@ -415,7 +421,7 @@ public sealed class DockRenderer
                     if (d < minDist) { minDist = d; bestIdx = j; }
                     else break;
                 }
-                RenamingCaretIndex = bestIdx;
+                _ui.RenamingCaretIndex = bestIdx;
             }
         }
         else
@@ -440,81 +446,81 @@ public sealed class DockRenderer
 
     void SaveRenaming()
     {
-        if (RenamingItemId != null && RenamingItemId.StartsWith("dock-item-"))
+        if (_ui.RenamingItemId != null && _ui.RenamingItemId.StartsWith("dock-item-"))
         {
             StorageService.Instance.Save(DockItems);
         }
-        RenamingItemId = null;
+        _ui.RenamingItemId = null;
     }
 
     bool NoteDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
     {
         rightClicked = false;
-        bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
-        bool focused = FocusedItemId == id;
+        bool hovered = rect.Contains(_input.MousePosition.X, _input.MousePosition.Y);
+        bool focused = _ui.FocusedItemId == id;
 
-        if (hovered && (LeftMousePressed || RightMousePressed))
+        if (hovered && (_input.LeftMousePressed || _input.RightMousePressed))
         {
-            ActiveElementId = id;
+            _ui.ActiveElementId = id;
         }
 
-        bool active = ActiveElementId == id;
-        bool pressed = active && (LeftMouseDown || RightMouseDown);
-        bool clicked = active && hovered && LeftMouseReleased;
-        rightClicked = active && hovered && RightMouseReleased;
+        bool active = _ui.ActiveElementId == id;
+        bool pressed = active && (_input.LeftMouseDown || _input.RightMouseDown);
+        bool clicked = active && hovered && _input.LeftMouseReleased;
+        rightClicked = active && hovered && _input.RightMouseReleased;
 
         var bgColor = focused ? new SKColor(255, 255, 180) : new SKColor(255, 255, 220);
         if (pressed) bgColor = new SKColor(240, 240, 160);
 
         using var paint = new SKPaint { IsAntialias = true, Color = bgColor };
-        float radius = 4 * ItemScale;
+        float radius = 4 * _ui.ItemScale;
         canvas.DrawRoundRect(rect, radius, radius, paint);
 
         var note = GetNote(item.Value);
-        using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 11 * ItemScale };
-        var textPadding = 6 * ItemScale;
+        using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 11 * _ui.ItemScale };
+        var textPadding = 6 * _ui.ItemScale;
         var textRect = new SKRect(rect.Left + textPadding, rect.Top + textPadding, rect.Right - textPadding, rect.Bottom - textPadding);
         DrawTextInRect(canvas, note.Content, textRect, textPaint, focused);
 
         if (focused)
         {
-            using var borderPaint = new SKPaint { IsAntialias = true, Color = new SKColor(255, 165, 0), Style = SKPaintStyle.Stroke, StrokeWidth = 2 * ItemScale };
+            using var borderPaint = new SKPaint { IsAntialias = true, Color = new SKColor(255, 165, 0), Style = SKPaintStyle.Stroke, StrokeWidth = 2 * _ui.ItemScale };
             canvas.DrawRoundRect(rect, radius, radius, borderPaint);
         }
 
-        if (active && (LeftMouseReleased || RightMouseReleased)) ActiveElementId = null;
+        if (active && (_input.LeftMouseReleased || _input.RightMouseReleased)) _ui.ActiveElementId = null;
         return clicked;
     }
 
     bool TaskListDockItem(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
     {
         rightClicked = false;
-        bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
-        bool focused = FocusedItemId == id;
+        bool hovered = rect.Contains(_input.MousePosition.X, _input.MousePosition.Y);
+        bool focused = _ui.FocusedItemId == id;
 
-        if (hovered && (LeftMousePressed || RightMousePressed))
+        if (hovered && (_input.LeftMousePressed || _input.RightMousePressed))
         {
-            ActiveElementId = id;
+            _ui.ActiveElementId = id;
         }
 
-        bool active = ActiveElementId == id;
-        bool pressed = active && (LeftMouseDown || RightMouseDown);
-        bool clicked = active && hovered && LeftMouseReleased;
-        rightClicked = active && hovered && RightMouseReleased;
+        bool active = _ui.ActiveElementId == id;
+        bool pressed = active && (_input.LeftMouseDown || _input.RightMouseDown);
+        bool clicked = active && hovered && _input.LeftMouseReleased;
+        rightClicked = active && hovered && _input.RightMouseReleased;
 
         var bgColor = focused ? new SKColor(240, 240, 240) : new SKColor(255, 255, 255);
         if (pressed) bgColor = new SKColor(220, 220, 220);
 
         using var paint = new SKPaint { IsAntialias = true, Color = bgColor };
-        float radius = 4 * ItemScale;
+        float radius = 4 * _ui.ItemScale;
         canvas.DrawRoundRect(rect, radius, radius, paint);
 
         var list = GetTaskList(item.Value);
-        using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 10 * ItemScale };
+        using var textPaint = new SKPaint { IsAntialias = true, Color = SKColors.Black, TextSize = 10 * _ui.ItemScale };
         
-        float itemHeight = 14 * ItemScale;
-        float circleSize = 10 * ItemScale;
-        float padding = 6 * ItemScale;
+        float itemHeight = 14 * _ui.ItemScale;
+        float circleSize = 10 * _ui.ItemScale;
+        float padding = 6 * _ui.ItemScale;
 
         for (int i = 0; i < list.Tasks.Count; i++)
         {
@@ -524,40 +530,40 @@ public sealed class DockRenderer
 
             var circleRect = new SKRect(rect.Left + padding, ty + (itemHeight - circleSize)/2, rect.Left + padding + circleSize, ty + (itemHeight + circleSize)/2);
             
-            if (LeftMousePressed && circleRect.Contains(MousePosition.X, MousePosition.Y))
+            if (_input.LeftMousePressed && circleRect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
             {
                 task.IsCompleted = !task.IsCompleted;
                 list.Tasks[i] = task;
                 _taskListCache[item.Value] = list;
-                storageService.SaveTaskList(list);
+                _storageService.SaveTaskList(list);
             }
 
-            using var circlePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, Color = SKColors.Gray, StrokeWidth = 1 * ItemScale };
+            using var circlePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, Color = SKColors.Gray, StrokeWidth = 1 * _ui.ItemScale };
             canvas.DrawOval(circleRect, circlePaint);
             
             if (task.IsCompleted)
             {
                 using var checkPaint = new SKPaint { IsAntialias = true, Color = SKColors.Green, Style = SKPaintStyle.Fill };
-                circleRect.Inflate(-1 * ItemScale, -1 * ItemScale);
+                circleRect.Inflate(-1 * _ui.ItemScale, -1 * _ui.ItemScale);
                 canvas.DrawOval(circleRect, checkPaint);
             }
 
-            float textX = rect.Left + padding + circleSize + 6 * ItemScale;
+            float textX = rect.Left + padding + circleSize + 6 * _ui.ItemScale;
             float textY = ty + itemHeight * 0.75f;
             canvas.DrawText(task.Text, textX, textY, textPaint);
 
-            if (focused && FocusedTaskListIndex == i)
+            if (focused && _ui.FocusedTaskListIndex == i)
             {
-                float caretX = textX + textPaint.MeasureText(task.Text.Substring(0, Math.Clamp(CaretIndex, 0, task.Text.Length)));
-                using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+                float caretX = textX + textPaint.MeasureText(task.Text.Substring(0, Math.Clamp(_ui.CaretIndex, 0, task.Text.Length)));
+                using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * _ui.ItemScale };
                 canvas.DrawLine(caretX, ty + itemHeight * 0.2f, caretX, ty + itemHeight * 0.8f, caretPaint);
             }
 
             var rowRect = new SKRect(textX, ty, rect.Right - padding, ty + itemHeight);
-            if (focused && LeftMousePressed && rowRect.Contains(MousePosition.X, MousePosition.Y))
+            if (focused && _input.LeftMousePressed && rowRect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
             {
-                FocusedTaskListIndex = i;
-                float localX = MousePosition.X - textX;
+                _ui.FocusedTaskListIndex = i;
+                float localX = _input.MousePosition.X - textX;
                 int bestIdx = 0;
                 float minDist = float.MaxValue;
                 for (int j = 0; j <= task.Text.Length; j++)
@@ -567,17 +573,17 @@ public sealed class DockRenderer
                     if (d < minDist) { minDist = d; bestIdx = j; }
                     else break;
                 }
-                CaretIndex = bestIdx;
+                _ui.CaretIndex = bestIdx;
             }
         }
 
         if (focused)
         {
-            using var borderPaint = new SKPaint { IsAntialias = true, Color = SKColors.DodgerBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 2 * ItemScale };
+            using var borderPaint = new SKPaint { IsAntialias = true, Color = SKColors.DodgerBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 2 * _ui.ItemScale };
             canvas.DrawRoundRect(rect, radius, radius, borderPaint);
         }
 
-        if (active && (LeftMouseReleased || RightMouseReleased)) ActiveElementId = null;
+        if (active && (_input.LeftMouseReleased || _input.RightMouseReleased)) _ui.ActiveElementId = null;
         return clicked;
     }
 
@@ -639,7 +645,7 @@ public sealed class DockRenderer
 
         if (isFocused && text == "")
         {
-            using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+            using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * _ui.ItemScale };
             canvas.DrawLine(rect.Left, y - paint.TextSize, rect.Left, y + 2, caretPaint);
         }
 
@@ -657,9 +663,9 @@ public sealed class DockRenderer
             if (isFocused)
             {
                 var lineRect = new SKRect(lx, ly - paint.TextSize, rect.Right, ly + 2);
-                if (LeftMousePressed && lineRect.Contains(MousePosition.X, MousePosition.Y))
+                if (_input.LeftMousePressed && lineRect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
                 {
-                    float localX = MousePosition.X - lx;
+                    float localX = _input.MousePosition.X - lx;
                     int bestIdx = 0;
                     float minDist = float.MaxValue;
                     for (int j = 0; j <= lineText.Length; j++)
@@ -669,13 +675,13 @@ public sealed class DockRenderer
                         if (d < minDist) { minDist = d; bestIdx = j; }
                         else break;
                     }
-                    CaretIndex = startIdx + bestIdx;
+                    _ui.CaretIndex = startIdx + bestIdx;
                 }
                 
-                if (CaretIndex >= startIdx && CaretIndex <= startIdx + lineText.Length)
+                if (_ui.CaretIndex >= startIdx && _ui.CaretIndex <= startIdx + lineText.Length)
                 {
-                    float caretX = lx + paint.MeasureText(lineText.Substring(0, CaretIndex - startIdx));
-                    using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * ItemScale };
+                    float caretX = lx + paint.MeasureText(lineText.Substring(0, _ui.CaretIndex - startIdx));
+                    using var caretPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 1 * _ui.ItemScale };
                     canvas.DrawLine(caretX, ly - paint.TextSize, caretX, ly + 2, caretPaint);
                 }
             }
@@ -693,23 +699,23 @@ public sealed class DockRenderer
     StorageService.TaskList GetTaskList(string id)
     {
         if (_taskListCache.TryGetValue(id, out var list)) return list;
-        list = storageService.LoadTaskList(id);
+        list = _storageService.LoadTaskList(id);
         _taskListCache[id] = list;
         return list;
     }
 
     bool TextButton(SKCanvas canvas, SKRect rect, string text, string id)
     {
-        bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+        bool hovered = rect.Contains(_input.MousePosition.X, _input.MousePosition.Y);
 
-        if (hovered && LeftMousePressed)
+        if (hovered && _input.LeftMousePressed)
         {
-            ActiveElementId = id;
+            _ui.ActiveElementId = id;
         }
 
-        bool active = ActiveElementId == id;
-        bool pressed = active && LeftMouseDown;
-        bool clicked = active && hovered && LeftMouseReleased;
+        bool active = _ui.ActiveElementId == id;
+        bool pressed = active && _input.LeftMouseDown;
+        bool clicked = active && hovered && _input.LeftMouseReleased;
 
         var color = pressed
             ? new SKColor(180, 180, 180, 255)
@@ -737,9 +743,9 @@ public sealed class DockRenderer
         
         canvas.DrawText(text, rect.MidX - textWidth / 2, rect.MidY + 5, textPaint);
 
-        if (active && (LeftMouseReleased || RightMouseReleased))
+        if (active && (_input.LeftMouseReleased || _input.RightMouseReleased))
         {
-            ActiveElementId = null;
+            _ui.ActiveElementId = null;
         }
 
         return clicked;
@@ -748,17 +754,17 @@ public sealed class DockRenderer
     bool DockItemButton(SKCanvas canvas, SKRect rect, StorageService.DockItem item, string id, out bool rightClicked)
     {
         rightClicked = false;
-        bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+        bool hovered = rect.Contains(_input.MousePosition.X, _input.MousePosition.Y);
 
-        if (hovered && (LeftMousePressed || RightMousePressed))
+        if (hovered && (_input.LeftMousePressed || _input.RightMousePressed))
         {
-            ActiveElementId = id;
+            _ui.ActiveElementId = id;
         }
 
-        bool active = ActiveElementId == id;
-        bool pressed = active && (LeftMouseDown || RightMouseDown);
-        bool clicked = active && hovered && LeftMouseReleased;
-        rightClicked = active && hovered && RightMouseReleased;
+        bool active = _ui.ActiveElementId == id;
+        bool pressed = active && (_input.LeftMouseDown || _input.RightMouseDown);
+        bool clicked = active && hovered && _input.LeftMouseReleased;
+        rightClicked = active && hovered && _input.RightMouseReleased;
 
         var cardColor = pressed
             ? new SKColor(230, 230, 230, 180)
@@ -772,15 +778,15 @@ public sealed class DockRenderer
             Color = cardColor
         };
 
-        float radius = 12 * ItemScale;
+        float radius = 12 * _ui.ItemScale;
         canvas.DrawRoundRect(rect, radius, radius, cardPaint);
 
-        SKImage? icon = GetDockItemIcon(item.Value);
+        SKImage? icon = Helpers.GetDockItemIcon(item.Value);
 
         if (icon is not null)
         {
             // icon rect is inner rect with small padding
-            var iconPadding = 1 * ItemScale;
+            var iconPadding = 1 * _ui.ItemScale;
             SKRect iconRect = new SKRect(
                 rect.Left + iconPadding,
                 rect.Top + iconPadding,
@@ -791,9 +797,9 @@ public sealed class DockRenderer
             canvas.DrawImage(icon, iconRect);
         }
         
-        if (active && (LeftMouseReleased || RightMouseReleased))
+        if (active && (_input.LeftMouseReleased || _input.RightMouseReleased))
         {
-            ActiveElementId = null;
+            _ui.ActiveElementId = null;
         }
 
         return clicked;
@@ -801,16 +807,16 @@ public sealed class DockRenderer
 
     bool AddButton(SKCanvas canvas, SKRect rect, string id)
     {
-        bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+        bool hovered = rect.Contains(_input.MousePosition.X, _input.MousePosition.Y);
 
-        if (hovered && LeftMousePressed)
+        if (hovered && _input.LeftMousePressed)
         {
-            ActiveElementId = id;
+            _ui.ActiveElementId = id;
         }
 
-        bool active = ActiveElementId == id;
-        bool pressed = active && LeftMouseDown;
-        bool clicked = active && hovered && LeftMouseReleased;
+        bool active = _ui.ActiveElementId == id;
+        bool pressed = active && _input.LeftMouseDown;
+        bool clicked = active && hovered && _input.LeftMouseReleased;
 
         var color = pressed
             ? new SKColor(60, 100, 200, 255)
@@ -842,9 +848,9 @@ public sealed class DockRenderer
         canvas.DrawLine(centerX - plusSize, centerY, centerX + plusSize, centerY, plusPaint);
         canvas.DrawLine(centerX, centerY - plusSize, centerX, centerY + plusSize, plusPaint);
 
-        if (active && (LeftMouseReleased || RightMouseReleased))
+        if (active && (_input.LeftMouseReleased || _input.RightMouseReleased))
         {
-            ActiveElementId = null;
+            _ui.ActiveElementId = null;
         }
 
         return clicked;
@@ -869,7 +875,7 @@ public sealed class DockRenderer
         const float rowHeight = 40;
         const float menuPadding = 6;
 
-        AddMenuRect = GetAddMenuRect(addButtonRect);
+        _ui.AddMenuRect = GetAddMenuRect(addButtonRect);
 
 
         using var menuPaint = new SKPaint
@@ -878,13 +884,13 @@ public sealed class DockRenderer
             Color = new SKColor(255, 255, 255, 245)
         };
 
-        canvas.DrawRoundRect(AddMenuRect, 12, 12, menuPaint);
+        canvas.DrawRoundRect(_ui.AddMenuRect, 12, 12, menuPaint);
 
         var itemRect = new SKRect(
-            AddMenuRect.Left + menuPadding,
-            AddMenuRect.Top + menuPadding,
-            AddMenuRect.Right - menuPadding,
-            AddMenuRect.Top + menuPadding + rowHeight);
+            _ui.AddMenuRect.Left + menuPadding,
+            _ui.AddMenuRect.Top + menuPadding,
+            _ui.AddMenuRect.Right - menuPadding,
+            _ui.AddMenuRect.Top + menuPadding + rowHeight);
 
         var noteRect = new SKRect(
             itemRect.Left,
@@ -918,16 +924,16 @@ public sealed class DockRenderer
 
     bool MenuItem(SKCanvas canvas, SKRect rect, string text, string id)
     {
-        bool hovered = rect.Contains(MousePosition.X, MousePosition.Y);
+        bool hovered = rect.Contains(_input.MousePosition.X, _input.MousePosition.Y);
 
-        if (hovered && LeftMousePressed)
+        if (hovered && _input.LeftMousePressed)
         {
-            ActiveElementId = id;
+            _ui.ActiveElementId = id;
         }
 
-        bool active = ActiveElementId == id;
-        bool pressed = active && LeftMouseDown;
-        bool clicked = active && hovered && LeftMouseReleased;
+        bool active = _ui.ActiveElementId == id;
+        bool pressed = active && _input.LeftMouseDown;
+        bool clicked = active && hovered && _input.LeftMouseReleased;
 
         var backgroundColor = pressed
             ? new SKColor(220, 220, 220, 255)
@@ -957,15 +963,15 @@ public sealed class DockRenderer
 
         canvas.DrawText(text, rect.Left + 12, rect.MidY + 6, textFont, textPaint);
 
-        if (active && (LeftMouseReleased || RightMouseReleased))
+        if (active && (_input.LeftMouseReleased || _input.RightMouseReleased))
         {
-            ActiveElementId = null;
+            _ui.ActiveElementId = null;
         }
 
         return clicked;
     }
 
-    SKRect GetContextMenuRect(Vector2 position)
+    SKRect GetContextMenuRect(Vector2D<int> position)
     {
         const float menuWidth = 140;
         const float rowHeight = 40;
@@ -975,26 +981,26 @@ public sealed class DockRenderer
         float x = position.X;
         float y = position.Y;
         
-        if (x + menuWidth > lastFramebufferSize.X)
+        if (x + menuWidth > _ui.LastFramebufferSize.X)
         {
-            x = lastFramebufferSize.X - menuWidth - 4;
+            x = _ui.LastFramebufferSize.X - menuWidth - 4;
         }
         
         int rowCount = 2; // Remove, Rename
         float totalHeight = (rowHeight * rowCount) + menuPadding * 2;
 
-        if (y + totalHeight > lastFramebufferSize.Y)
+        if (y + totalHeight > _ui.LastFramebufferSize.Y)
         {
-            y = lastFramebufferSize.Y - totalHeight - 4;
+            y = _ui.LastFramebufferSize.Y - totalHeight - 4;
         }
 
-        ContextMenuRect = new SKRect(
+        _ui.ContextMenuRect = new SKRect(
             x,
             y,
             x + menuWidth,
             y + totalHeight);
 
-        return ContextMenuRect;
+        return _ui.ContextMenuRect;
     }
 
     string? DrawContextMenu(SKCanvas canvas)
@@ -1002,7 +1008,7 @@ public sealed class DockRenderer
         const float rowHeight = 40;
         const float menuPadding = 6;
         
-        ContextMenuRect = GetContextMenuRect(ContextMenuPosition);
+        _ui.ContextMenuRect = GetContextMenuRect(_ui.ContextMenuPosition);
 
         using var menuPaint = new SKPaint
         {
@@ -1010,13 +1016,13 @@ public sealed class DockRenderer
             Color = new SKColor(255, 255, 255, 245)
         };
 
-        canvas.DrawRoundRect(ContextMenuRect, 12, 12, menuPaint);
+        canvas.DrawRoundRect(_ui.ContextMenuRect, 12, 12, menuPaint);
 
         var renameRect = new SKRect(
-            ContextMenuRect.Left + menuPadding,
-            ContextMenuRect.Top + menuPadding,
-            ContextMenuRect.Right - menuPadding,
-            ContextMenuRect.Top + menuPadding + rowHeight);
+            _ui.ContextMenuRect.Left + menuPadding,
+            _ui.ContextMenuRect.Top + menuPadding,
+            _ui.ContextMenuRect.Right - menuPadding,
+            _ui.ContextMenuRect.Top + menuPadding + rowHeight);
 
         var removeRect = new SKRect(
             renameRect.Left,
