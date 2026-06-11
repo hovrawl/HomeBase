@@ -3,6 +3,8 @@ using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Dwm;
 using Windows.Win32.UI.Controls;
 
+namespace HomeBase.Windows;
+
 internal static unsafe class DwmWindowEffects
 {
     public static void ApplyDockWindowEffects(HWND hwnd)

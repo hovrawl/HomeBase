@@ -1,10 +1,8 @@
-﻿using System.IO;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Collections.Generic;
 using SkiaSharp;
 
-namespace HomeBase;
+namespace HomeBase.Services;
 
 public class StorageService
 {
@@ -46,12 +44,12 @@ public class StorageService
             return new List<DockItem>();
 
         string json = File.ReadAllText(_filePath);
-        return JsonSerializer.Deserialize(json, DockItemSerializerContext.Default.ListDockItem) ?? new List<DockItem>();
+        return JsonSerializer.Deserialize(json, Helpers.DockItemSerializerContext.Default.ListDockItem) ?? new List<DockItem>();
     }
 
     public void Save()
     {
-        string json = JsonSerializer.Serialize(Items, DockItemSerializerContext.Default.ListDockItem);
+        string json = JsonSerializer.Serialize(Items, Helpers.DockItemSerializerContext.Default.ListDockItem);
         File.WriteAllText(_filePath, json);
     }
 
@@ -67,7 +65,7 @@ public class StorageService
         else
         {
             string json = File.ReadAllText(path);
-            note = JsonSerializer.Deserialize(json, DockItemSerializerContext.Default.Note);
+            note = JsonSerializer.Deserialize(json, Helpers.DockItemSerializerContext.Default.Note);
         }
         
         _noteCache[id] = note;
@@ -78,7 +76,7 @@ public class StorageService
     {
         _noteCache[note.Id] = note;
         string path = Path.Combine(_notesPath, $"{note.Id}.json");
-        string json = JsonSerializer.Serialize(note, DockItemSerializerContext.Default.Note);
+        string json = JsonSerializer.Serialize(note, Helpers.DockItemSerializerContext.Default.Note);
         File.WriteAllText(path, json);
     }
 
@@ -94,7 +92,7 @@ public class StorageService
         else
         {
             string json = File.ReadAllText(path);
-            list = JsonSerializer.Deserialize(json, DockItemSerializerContext.Default.TaskList);
+            list = JsonSerializer.Deserialize(json, Helpers.DockItemSerializerContext.Default.TaskList);
         }
         
         _taskListCache[id] = list;
@@ -105,7 +103,7 @@ public class StorageService
     {
         _taskListCache[taskList.Id] = taskList;
         string path = Path.Combine(_taskListsPath, $"{taskList.Id}.json");
-        string json = JsonSerializer.Serialize(taskList, DockItemSerializerContext.Default.TaskList);
+        string json = JsonSerializer.Serialize(taskList, Helpers.DockItemSerializerContext.Default.TaskList);
         File.WriteAllText(path, json);
     }
     
@@ -140,11 +138,3 @@ public enum ItemType
     TaskList
 }
 
-[JsonSourceGenerationOptions(WriteIndented = true)]
-[JsonSerializable(typeof(List<StorageService.DockItem>))]
-[JsonSerializable(typeof(StorageService.Note))]
-[JsonSerializable(typeof(StorageService.TaskList))]
-[JsonSerializable(typeof(List<StorageService.TaskItem>))]
-internal partial class DockItemSerializerContext : JsonSerializerContext
-{
-}

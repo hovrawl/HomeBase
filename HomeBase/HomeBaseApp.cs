@@ -9,6 +9,8 @@ using Windows.Win32.System.Com;
 using Windows.Win32.UI.Shell;
 using HomeBase.Enums;
 using HomeBase.Models;
+using HomeBase.Services;
+using HomeBase.Windows;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;

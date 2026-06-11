@@ -6,6 +6,8 @@ using Windows.Win32.Foundation;
 using Windows.Win32.UI.Shell;
 using Windows.Win32.UI.WindowsAndMessaging;
 
+namespace HomeBase.Windows;
+
 internal static unsafe class TrayIcon
 {
     private const uint TrayIconId = 1;

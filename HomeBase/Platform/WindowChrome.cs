@@ -2,6 +2,8 @@
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
 
+namespace HomeBase.Windows;
+
 internal static class WindowChrome
 {
     public static void HideFromTaskbarAndAltTab(HWND hwnd)
