@@ -40,6 +40,8 @@ public sealed class HomeBaseApp : IDisposable
         _renderer = new DockRenderer(_ui, _inputState, _storageService, _actionQueue);
     }
 
+    private List<StorageService.DockItem> DockItems => _storageService.Items;
+
     public void Run()
     {
         CreateWindow();
@@ -234,7 +236,7 @@ public sealed class HomeBaseApp : IDisposable
             new GRGlFramebufferInfo(0, 0x8058)); // 0x8058 = GL_RGBA8
 
         _surface = SKSurface.Create(
-            grContext,
+            _grContext,
             _renderTarget,
             GRSurfaceOrigin.BottomLeft,
             SKColorType.Rgba8888);
@@ -338,15 +340,15 @@ public sealed class HomeBaseApp : IDisposable
 
         if (key == Key.Left)
         {
-            CaretIndex = Math.Max(0, CaretIndex - 1);
+            _ui.CaretIndex = Math.Max(0, _ui.CaretIndex - 1);
         }
         else if (key == Key.Right)
         {
             int len = 0;
-            if (item.Type == ItemType.Note) len = GetNote(item.Value).Content.Length;
+            if (item.Type == ItemType.Note) len = _storageService.GetNote(item.Value).Content.Length;
             else if (item.Type == ItemType.TaskList)
             {
-                var list = GetTaskList(item.Value);
+                var list = _storageService.GetTaskList(item.Value);
                 if (_ui.FocusedTaskListIndex >= 0 && _ui.FocusedTaskListIndex < list.Tasks.Count)
                     len = list.Tasks[_ui.FocusedTaskListIndex].Text.Length;
             }
@@ -356,11 +358,11 @@ public sealed class HomeBaseApp : IDisposable
         {
             if (item.Type == ItemType.Note)
             {
-                var note = GetNote(item.Value);
+                var note = _storageService.GetNote(item.Value);
                 float cardSize = (80 - 16) * _ui.ItemScale;
                 float textWidth = cardSize - 12 * _ui.ItemScale;
                 using var paint = new SKPaint { TextSize = 11 * _ui.ItemScale };
-                var visualLines = GetNoteVisualLines(note.Content, textWidth, paint);
+                var visualLines = DockRenderer.GetNoteVisualLines(note.Content, textWidth, paint);
                 
                 int currentLineIdx = -1;
                 for (int i = 0; i < visualLines.Count; i++)
@@ -385,7 +387,7 @@ public sealed class HomeBaseApp : IDisposable
             }
             else if (item.Type == ItemType.TaskList)
             {
-                var list = GetTaskList(item.Value);
+                var list = _storageService.GetTaskList(item.Value);
                 if (_ui.FocusedTaskListIndex > 0)
                 {
                     _ui.FocusedTaskListIndex--;
@@ -397,11 +399,11 @@ public sealed class HomeBaseApp : IDisposable
         {
             if (item.Type == ItemType.Note)
             {
-                var note = GetNote(item.Value);
+                var note = _storageService.GetNote(item.Value);
                 float cardSize = (80 - 16) * _ui.ItemScale;
                 float textWidth = cardSize - 12 * _ui.ItemScale;
                 using var paint = new SKPaint { TextSize = 11 * _ui.ItemScale };
-                var visualLines = GetNoteVisualLines(note.Content, textWidth, paint);
+                var visualLines = DockRenderer.GetNoteVisualLines(note.Content, textWidth, paint);
                 
                 int currentLineIdx = -1;
                 for (int i = 0; i < visualLines.Count; i++)
@@ -426,7 +428,7 @@ public sealed class HomeBaseApp : IDisposable
             }
             else if (item.Type == ItemType.TaskList)
             {
-                var list = GetTaskList(item.Value);
+                var list = _storageService.GetTaskList(item.Value);
                 if (_ui.FocusedTaskListIndex < list.Tasks.Count - 1)
                 {
                     _ui.FocusedTaskListIndex++;
@@ -438,18 +440,17 @@ public sealed class HomeBaseApp : IDisposable
         {
             if (item.Type == ItemType.Note)
             {
-                var note = GetNote(item.Value);
+                var note = _storageService.GetNote(item.Value);
                 if (_ui.CaretIndex > 0)
                 {
                     note.Content = note.Content.Remove(_ui.CaretIndex - 1, 1);
                     _ui.CaretIndex--;
-                    _noteCache[item.Value] = note;
-                    storageService.SaveNote(note);
+                    _storageService.SaveNote(note);
                 }
             }
             else if (item.Type == ItemType.TaskList)
             {
-                var list = GetTaskList(item.Value);
+                var list = _storageService.GetTaskList(item.Value);
                 if (_ui.FocusedTaskListIndex >= 0 && _ui.FocusedTaskListIndex < list.Tasks.Count)
                 {
                     var task = list.Tasks[_ui.FocusedTaskListIndex];
@@ -458,7 +459,6 @@ public sealed class HomeBaseApp : IDisposable
                         task.Text = task.Text.Remove(_ui.CaretIndex - 1, 1);
                         _ui.CaretIndex--;
                         list.Tasks[_ui.FocusedTaskListIndex] = task;
-                        _taskListCache[item.Value] = list;
                         _storageService.SaveTaskList(list);
                     }
                     else if (_ui.FocusedTaskListIndex > 0)
@@ -470,7 +470,6 @@ public sealed class HomeBaseApp : IDisposable
                         list.Tasks.RemoveAt(_ui.FocusedTaskListIndex);
                         _ui.FocusedTaskListIndex--;
                         _ui.CaretIndex = oldLen;
-                        _taskListCache[item.Value] = list;
                         _storageService.SaveTaskList(list);
                     }
                 }
@@ -480,17 +479,16 @@ public sealed class HomeBaseApp : IDisposable
         {
             if (item.Type == ItemType.Note)
             {
-                var note = GetNote(item.Value);
+                var note = _storageService.GetNote(item.Value);
                 if (_ui.CaretIndex < note.Content.Length)
                 {
                     note.Content = note.Content.Remove(_ui.CaretIndex, 1);
-                    _noteCache[item.Value] = note;
                     _storageService.SaveNote(note);
                 }
             }
             else if (item.Type == ItemType.TaskList)
             {
-                var list = GetTaskList(item.Value);
+                var list = _storageService.GetTaskList(item.Value);
                 if (_ui.FocusedTaskListIndex >= 0 && _ui.FocusedTaskListIndex < list.Tasks.Count)
                 {
                     var task = list.Tasks[_ui.FocusedTaskListIndex];
@@ -498,7 +496,6 @@ public sealed class HomeBaseApp : IDisposable
                     {
                         task.Text = task.Text.Remove(_ui.CaretIndex, 1);
                         list.Tasks[_ui.FocusedTaskListIndex] = task;
-                        _taskListCache[item.Value] = list;
                         _storageService.SaveTaskList(list);
                     }
                     else if (_ui.FocusedTaskListIndex < list.Tasks.Count - 1)
@@ -511,7 +508,6 @@ public sealed class HomeBaseApp : IDisposable
                         task.Text += nextTask.Text;
                         list.Tasks[_ui.FocusedTaskListIndex] = task;
                         list.Tasks.RemoveAt(_ui.FocusedTaskListIndex + 1);
-                        _taskListCache[item.Value] = list;
                         _storageService.SaveTaskList(list);
                     }
                 }
@@ -521,15 +517,14 @@ public sealed class HomeBaseApp : IDisposable
         {
             if (item.Type == ItemType.Note)
             {
-                var note = GetNote(item.Value);
+                var note = _storageService.GetNote(item.Value);
                 note.Content = note.Content.Insert(_ui.CaretIndex, "\n");
                 _ui.CaretIndex++;
-                _noteCache[item.Value] = note;
                 _storageService.SaveNote(note);
             }
             else if (item.Type == ItemType.TaskList)
             {
-                var list = GetTaskList(item.Value);
+                var list = _storageService.GetTaskList(item.Value);
                 if (_ui.FocusedTaskListIndex < 0) _ui.FocusedTaskListIndex = list.Tasks.Count - 1;
                 
                 var currentTask = list.Tasks[_ui.FocusedTaskListIndex];
@@ -541,7 +536,6 @@ public sealed class HomeBaseApp : IDisposable
                 _ui.FocusedTaskListIndex++;
                 _ui.CaretIndex = 0;
                 
-                _taskListCache[item.Value] = list;
                 _storageService.SaveTaskList(list);
             }
         }
@@ -569,16 +563,15 @@ public sealed class HomeBaseApp : IDisposable
         var item = DockItems[index];
         if (item.Type == ItemType.Note)
         {
-            var note = GetNote(item.Value);
-            CaretIndex = Math.Clamp(_ui.CaretIndex, 0, note.Content.Length);
+            var note = _storageService.GetNote(item.Value);
+            _ui.CaretIndex = Math.Clamp(_ui.CaretIndex, 0, note.Content.Length);
             note.Content = note.Content.Insert(_ui.CaretIndex, character.ToString());
             _ui.CaretIndex++;
-            _noteCache[item.Value] = note;
             _storageService.SaveNote(note);
         }
         else if (item.Type == ItemType.TaskList)
         {
-            var list = GetTaskList(item.Value);
+            var list = _storageService.GetTaskList(item.Value);
             if (list.Tasks.Count == 0)
             {
                 list.Tasks.Add(new StorageService.TaskItem("", false));
@@ -588,11 +581,10 @@ public sealed class HomeBaseApp : IDisposable
             
             if (_ui.FocusedTaskListIndex < 0) _ui.FocusedTaskListIndex = list.Tasks.Count - 1;
             var task = list.Tasks[_ui.FocusedTaskListIndex];
-            CaretIndex = Math.Clamp(_ui.CaretIndex, 0, task.Text.Length);
+            _ui.CaretIndex = Math.Clamp(_ui.CaretIndex, 0, task.Text.Length);
             task.Text = task.Text.Insert(_ui.CaretIndex, character.ToString());
             _ui.CaretIndex++;
             list.Tasks[_ui.FocusedTaskListIndex] = task;
-            _taskListCache[item.Value] = list;
             _storageService.SaveTaskList(list);
         }
     }
@@ -628,7 +620,7 @@ public sealed class HomeBaseApp : IDisposable
         Debug.WriteLine($"Selected file: {dockItem.Name}, Path: {dockItem.Value}");
     
         DockItems.Add(dockItem);
-        StorageService.Instance.Save(DockItems);
+        _storageService.Save();
     }
 
     void CreateNote()
@@ -636,11 +628,10 @@ public sealed class HomeBaseApp : IDisposable
         string id = Guid.NewGuid().ToString();
         var note = new StorageService.Note(id, "");
         _storageService.SaveNote(note);
-        _noteCache[id] = note;
     
         var dockItem = new StorageService.DockItem("Note", id, ItemType.Note);
         DockItems.Add(dockItem);
-        StorageService.Instance.Save(DockItems);
+        _storageService.Save();
     }
 
     void CreateTaskList()
@@ -648,11 +639,10 @@ public sealed class HomeBaseApp : IDisposable
         string id = Guid.NewGuid().ToString();
         var taskList = new StorageService.TaskList(id, new List<StorageService.TaskItem>());
         _storageService.SaveTaskList(taskList);
-        _taskListCache[id] = taskList;
     
         var dockItem = new StorageService.DockItem("Tasks", id, ItemType.TaskList);
         DockItems.Add(dockItem);
-        StorageService.Instance.Save(DockItems);
+        _storageService.Save();
     }
 
     void RemoveDockItem(int index)
@@ -660,7 +650,7 @@ public sealed class HomeBaseApp : IDisposable
         if (index >= 0 && index < DockItems.Count)
         {
             DockItems.RemoveAt(index);
-            StorageService.Instance.Save(DockItems);
+            _storageService.Save();
         }
     }
 

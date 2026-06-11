@@ -10,20 +10,22 @@ public sealed class DockRenderer
 {
     private UIState _ui;
     private InputState _input;
-    private readonly DockModel _model;
+    private readonly StorageService _storage;
     private readonly ConcurrentQueue<Action> _actionQueue;
 
     public DockRenderer(
         UIState ui,
         InputState input,
-        DockModel model,
+        StorageService storage,
         ConcurrentQueue<Action> actionQueue)
     {
         _ui = ui;
         _input = input;
-        _model = model;
+        _storage = storage;
         _actionQueue = actionQueue;
     }
+
+    private List<StorageService.DockItem> DockItems => _storage.Items;
 
     public void Render(SKCanvas canvas)
     {
@@ -366,7 +368,7 @@ public sealed class DockRenderer
             }
         }
 
-        if (_input.LeftMouseReleased && !anyHovered && !_ui.IsAddMenuOpen && !_ui.ContextMenuRect.Contains(MousePosition.X, MousePosition.Y))
+        if (_input.LeftMouseReleased && !anyHovered && !_ui.IsAddMenuOpen && !_ui.ContextMenuRect.Contains(_input.MousePosition.X, _input.MousePosition.Y))
         {
             if (dockPanel.Contains(_input.MousePosition.X, _input.MousePosition.Y))
             {
@@ -448,7 +450,7 @@ public sealed class DockRenderer
     {
         if (_ui.RenamingItemId != null && _ui.RenamingItemId.StartsWith("dock-item-"))
         {
-            StorageService.Instance.Save(DockItems);
+            _storage.Save();
         }
         _ui.RenamingItemId = null;
     }
@@ -534,8 +536,7 @@ public sealed class DockRenderer
             {
                 task.IsCompleted = !task.IsCompleted;
                 list.Tasks[i] = task;
-                _taskListCache[item.Value] = list;
-                _storageService.SaveTaskList(list);
+                _storage.SaveTaskList(list);
             }
 
             using var circlePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, Color = SKColors.Gray, StrokeWidth = 1 * _ui.ItemScale };
@@ -587,7 +588,7 @@ public sealed class DockRenderer
         return clicked;
     }
 
-    List<(string text, int startIdx)> GetNoteVisualLines(string content, float width, SKPaint paint)
+    public static List<(string text, int startIdx)> GetNoteVisualLines(string content, float width, SKPaint paint)
     {
         var visualLines = new List<(string text, int startIdx)>();
         int pos = 0;
@@ -690,18 +691,12 @@ public sealed class DockRenderer
 
     StorageService.Note GetNote(string id)
     {
-        if (_noteCache.TryGetValue(id, out var note)) return note;
-        note = storageService.LoadNote(id);
-        _noteCache[id] = note;
-        return note;
+        return _storage.GetNote(id);
     }
 
     StorageService.TaskList GetTaskList(string id)
     {
-        if (_taskListCache.TryGetValue(id, out var list)) return list;
-        list = _storageService.LoadTaskList(id);
-        _taskListCache[id] = list;
-        return list;
+        return _storage.GetTaskList(id);
     }
 
     bool TextButton(SKCanvas canvas, SKRect rect, string text, string id)
@@ -781,7 +776,7 @@ public sealed class DockRenderer
         float radius = 12 * _ui.ItemScale;
         canvas.DrawRoundRect(rect, radius, radius, cardPaint);
 
-        SKImage? icon = Helpers.GetDockItemIcon(item.Value);
+        SKImage? icon = _storage.GetDockItemIcon(item.Value);
 
         if (icon is not null)
         {
