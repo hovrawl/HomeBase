@@ -231,7 +231,7 @@ public sealed class HomeBaseApp : IDisposable
         _surface?.Dispose();
         _surface = null;
 
-        _renderTarget.Dispose();
+        _renderTarget?.Dispose();
 
         _ui.LastFramebufferSize = framebufferSize;
 
