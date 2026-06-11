@@ -18,7 +18,7 @@ namespace HomeBase;
 public sealed class HomeBaseApp : IDisposable
 {
     private readonly StorageService _storageService = new();
-    private readonly ConcurrentQueue<Action> _actionQueue = new();
+    private readonly ConcurrentQueue<AppAction> _actionQueue = new();
 
     private IWindow? _window;
     private IInputContext? _input;
@@ -51,21 +51,18 @@ public sealed class HomeBaseApp : IDisposable
 
     private void InitializeWindow()
     {
-        
-        // Setup skia
-        _grGlInterface = GRGlInterface.Create(name =>
-            _window.GLContext!.TryGetProcAddress(name, out var addr) ? addr : IntPtr.Zero);
-
-        _grGlInterface.Validate();
-
-        _grContext = GRContext.CreateGl(_grGlInterface);
-        
         _window.Load += WindowOnLoad;
         _window.Update += WindowOnUpdate;
         _window.Render += WindowOnRender;
         _window.FocusChanged += WindowOnFocusChanged;
         _window.Initialize();
 
+        // Setup skia
+        _grGlInterface = GRGlInterface.Create(name =>
+            _window.GLContext!.TryGetProcAddress(name, out var addr) ? addr : IntPtr.Zero);
+        _grGlInterface.Validate();
+        
+        _grContext = GRContext.CreateGl(_grGlInterface);
         // Position before applying DWM effects as it forces a show
         if (_window.Monitor != null)
         {
@@ -88,7 +85,7 @@ public sealed class HomeBaseApp : IDisposable
             {
                 _window.Close();
             }, 
-                () => _actionQueue.Enqueue(AboutWindow.Show));
+                () => _actionQueue.Enqueue(new AppAction.ShowAbout()));
         }
         
         // Setup windows low level hook
@@ -96,7 +93,7 @@ public sealed class HomeBaseApp : IDisposable
         _hotKey = new GlobalHotkey(() =>
         {
             // Summon/focus your window here.
-            _actionQueue.Enqueue(AppAction.SummonDock);
+            _actionQueue.Enqueue(new AppAction.SummonDock());
         });
     }
 
@@ -164,9 +161,9 @@ public sealed class HomeBaseApp : IDisposable
         }
 
         // Queued actions
-        while (_actionQueue.TryDequeue(out Action? action))
+        while (_actionQueue.TryDequeue(out AppAction? action))
         {
-            action();
+            HandleAction(action);
         }
     }
 
@@ -196,7 +193,7 @@ public sealed class HomeBaseApp : IDisposable
         else
         {
             // slide off screen
-            DismissDock();
+            _actionQueue.Enqueue(new AppAction.DismissDock());
         }
     }
     
@@ -280,6 +277,47 @@ public sealed class HomeBaseApp : IDisposable
     #endregion
     
     #region Methods
+
+    private void HandleAction(AppAction action)
+    {
+        switch (action)
+        {
+            case AppAction.ShowAbout:
+                AboutWindow.Show();
+                break;
+            case AppAction.OpenAddItemDialog:
+                OpenAddItemDialog();
+                break;
+            case AppAction.CreateNote:
+                CreateNote();
+                break;
+            case AppAction.CreateTaskList:
+                CreateTaskList();
+                break;
+            case AppAction.RemoveDockItem remove:
+                RemoveDockItem(remove.Index);
+                break;
+            case AppAction.OpenDockItem open:
+                OnDockItemClicked(DockItems[open.Index]);
+                break;
+            case AppAction.SummonDock:
+                SummonDock();
+                break;
+            case AppAction.DismissDock:
+                DismissDock();
+                break;
+            case AppAction.OpenFile openFile:
+                OpenLikeExplorer(openFile.Path);
+                break;
+            case AppAction.RenameItem rename:
+                var item = DockItems[rename.Index];
+                item.Name = rename.NewName;
+                DockItems[rename.Index] = item;
+                _storageService.Save();
+                break;
+        }
+    }
+
     void KeyDown(IKeyboard keyboard, Key key, int keyCode)
 {
     // Quit
@@ -287,10 +325,10 @@ public sealed class HomeBaseApp : IDisposable
     {
         if (_ui.RenamingItemId != null)
         {
-            SaveRenaming();
+            _renderer.SaveRenaming();
             return;
         }
-        DismissDock();
+        _actionQueue.Enqueue(new AppAction.DismissDock());
         return;
     }
 
@@ -301,7 +339,7 @@ public sealed class HomeBaseApp : IDisposable
 
         if (key == Key.Enter)
         {
-            SaveRenaming();
+            _renderer.SaveRenaming();
             return;
         }
         
@@ -675,7 +713,7 @@ public sealed class HomeBaseApp : IDisposable
     {
         if (_ui.RenamingItemId != null)
         {
-            SaveRenaming();
+            _renderer.SaveRenaming();
         }
 
         _ui.ActiveElementId = null;

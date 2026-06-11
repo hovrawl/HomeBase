@@ -11,13 +11,13 @@ public sealed class DockRenderer
     private UIState _ui;
     private InputState _input;
     private readonly StorageService _storage;
-    private readonly ConcurrentQueue<Action> _actionQueue;
+    private readonly ConcurrentQueue<AppAction> _actionQueue;
 
     public DockRenderer(
         UIState ui,
         InputState input,
         StorageService storage,
-        ConcurrentQueue<Action> actionQueue)
+        ConcurrentQueue<AppAction> actionQueue)
     {
         _ui = ui;
         _input = input;
@@ -203,17 +203,17 @@ public sealed class DockRenderer
             if (selectedAddMenuItem == "Item")
             {
                 _ui.IsAddMenuOpen = false;
-                _actionQueue.Enqueue(AppAction.OpenAddItemDialog);
+                _actionQueue.Enqueue(new AppAction.OpenAddItemDialog());
             }
             else if (selectedAddMenuItem == "Note")
             {
                 _ui.IsAddMenuOpen = false;
-                _actionQueue.Enqueue(AppAction.CreateNote);
+                _actionQueue.Enqueue(new AppAction.CreateNote());
             }
             else if (selectedAddMenuItem == "TaskList")
             {
                 _ui.IsAddMenuOpen = false;
-                _actionQueue.Enqueue(AppAction.CreateTaskList);
+                _actionQueue.Enqueue(new AppAction.CreateTaskList());
             }    
         }
 
@@ -225,7 +225,7 @@ public sealed class DockRenderer
             {
                 _ui.IsContextMenuOpen = false;
                 int indexToRemove = _ui.ContextMenuItemIndex;
-                _actionQueue.Enqueue(() => AppAction.RemoveDockItem(indexToRemove));
+                _actionQueue.Enqueue(new AppAction.RemoveDockItem(indexToRemove));
             }
             else if (selectedContextAction == "Rename")
             {
@@ -336,7 +336,7 @@ public sealed class DockRenderer
 
                 if (item.Type == ItemType.File)
                 {
-                    _actionQueue.Enqueue(() => OnDockItemClicked(item));
+                    _actionQueue.Enqueue(new AppAction.OpenDockItem(originalIndex));
                 }
                 else
                 {
@@ -446,7 +446,7 @@ public sealed class DockRenderer
         }
     }
 
-    void SaveRenaming()
+    internal void SaveRenaming()
     {
         if (_ui.RenamingItemId != null && _ui.RenamingItemId.StartsWith("dock-item-"))
         {
