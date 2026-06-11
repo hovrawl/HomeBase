@@ -1,14 +1,9 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Numerics;
-using System.Runtime.InteropServices;
-using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.Graphics.Gdi;
-using Windows.Win32.System.Com;
-using Windows.Win32.UI.Shell;
 using HomeBase.Enums;
 using HomeBase.Models;
+using HomeBase.Render;
 using HomeBase.Services;
 using HomeBase.Windows;
 using Silk.NET.Input;
@@ -35,7 +30,7 @@ public sealed class HomeBaseApp : IDisposable
     private readonly DockRenderer _renderer;
     private readonly DockWindowAnimation _animation = new();
     private bool _disposed;
-    private HWND hwnd;
+    private HWND _hwnd;
     private GlobalHotkey _hotKey;
     
     public HomeBaseApp()
@@ -77,13 +72,13 @@ public sealed class HomeBaseApp : IDisposable
         // Apply DWM effects
         if (_window.Native?.Win32 is { } win32Window)
         {
-            hwnd = new HWND(win32Window.Hwnd);
+            _hwnd = new HWND(win32Window.Hwnd);
     
-            WindowChrome.HideFromTaskbarAndAltTab(hwnd);
+            WindowChrome.HideFromTaskbarAndAltTab(_hwnd);
 
-            DwmWindowEffects.ApplyDockWindowEffects(hwnd);
+            DwmWindowEffects.ApplyDockWindowEffects(_hwnd);
     
-            TrayIcon.Add(hwnd, 
+            TrayIcon.Add(_hwnd, 
                 () =>
             {
                 _window.Close();
@@ -406,8 +401,10 @@ public sealed class HomeBaseApp : IDisposable
                 var note = _storageService.GetNote(item.Value);
                 float cardSize = (80 - 16) * _ui.ItemScale;
                 float textWidth = cardSize - 12 * _ui.ItemScale;
-                using var paint = new SKPaint { TextSize = 11 * _ui.ItemScale };
-                var visualLines = DockRenderer.GetNoteVisualLines(note.Content, textWidth, paint);
+                using var paint = new SKPaint();
+                using var font = new SKFont();
+                font.Size = 11 * _ui.ItemScale;
+                var visualLines = DockRenderer.GetNoteVisualLines(note.Content, textWidth, font, paint);
                 
                 int currentLineIdx = -1;
                 for (int i = 0; i < visualLines.Count; i++)
@@ -447,8 +444,12 @@ public sealed class HomeBaseApp : IDisposable
                 var note = _storageService.GetNote(item.Value);
                 float cardSize = (80 - 16) * _ui.ItemScale;
                 float textWidth = cardSize - 12 * _ui.ItemScale;
-                using var paint = new SKPaint { TextSize = 11 * _ui.ItemScale };
-                var visualLines = DockRenderer.GetNoteVisualLines(note.Content, textWidth, paint);
+                using var textPaint = new SKPaint();
+                textPaint.IsAntialias = true;
+                textPaint.Color = SKColors.Black;
+                using var font = new SKFont();
+                font.Size = 11 * _ui.ItemScale;
+                var visualLines = DockRenderer.GetNoteVisualLines(note.Content, textWidth, font, textPaint);
                 
                 int currentLineIdx = -1;
                 for (int i = 0; i < visualLines.Count; i++)
