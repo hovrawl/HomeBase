@@ -3,7 +3,7 @@ using Silk.NET.Maths;
 
 namespace HomeBase.Models;
 
-public struct InputState
+public class InputState
 {
     public Vector2D<int> MousePosition { get; set; }
 

@@ -5,7 +5,7 @@ using SkiaSharp;
 
 namespace HomeBase.Models;
 
-public struct UIState
+public class UIState
 {
     public bool DidInitialLayout { get; set; }
     
