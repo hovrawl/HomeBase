@@ -20,18 +20,18 @@ public sealed class HomeBaseApp : IDisposable
 
     private IWindow? _window;
     private IInputContext? _input;
-    private GRGlInterface _grGlInterface;
+    private GRGlInterface? _grGlInterface;
     private GRContext? _grContext;
     private GRBackendRenderTarget? _renderTarget;
     private SKSurface? _surface;
 
-    private UIState _ui = new();
-    private InputState _inputState = new();
+    private readonly UIState _ui = new();
+    private readonly InputState _inputState = new();
     private readonly DockRenderer _renderer;
     private readonly DockWindowAnimation _animation = new();
     private bool _disposed;
     private HWND _hwnd;
-    private GlobalHotkey _hotKey;
+    private GlobalHotkey? _hotKey;
     
     public HomeBaseApp()
     {
@@ -49,7 +49,7 @@ public sealed class HomeBaseApp : IDisposable
 
     private void InitializeWindow()
     {
-        _window.Load += WindowOnLoad;
+        _window!.Load += WindowOnLoad;
         _window.Update += WindowOnUpdate;
         _window.Render += WindowOnRender;
         _window.FocusChanged += WindowOnFocusChanged;
@@ -61,6 +61,11 @@ public sealed class HomeBaseApp : IDisposable
         _grGlInterface.Validate();
         
         _grContext = GRContext.CreateGl(_grGlInterface);
+        if (_grContext == null)
+        {
+            throw new Exception("Failed to create skia context");
+        }
+        
         // Position before applying DWM effects as it forces a show
         if (_window.Monitor != null)
         {
@@ -109,6 +114,11 @@ public sealed class HomeBaseApp : IDisposable
         windowOptions.TransparentFramebuffer = true;
 
         _window = Window.Create(windowOptions);
+
+        if (_window == null)
+        {
+            throw new Exception("Failed to create window");
+        }
     }
 
 
@@ -140,7 +150,7 @@ public sealed class HomeBaseApp : IDisposable
         
         // Dock summon/hide animation
         var animatedPosition = _animation.Update(deltaTime);
-        if (animatedPosition != null && animatedPosition != _window.Position)
+        if (animatedPosition != null && animatedPosition != _window!.Position)
         {
             _window.Position = animatedPosition.Value;
         }
@@ -213,7 +223,6 @@ public sealed class HomeBaseApp : IDisposable
         }
 
         if (_surface is not null &&
-            _renderTarget is not null &&
             framebufferSize == _ui.LastFramebufferSize)
         {
             return;
@@ -222,8 +231,7 @@ public sealed class HomeBaseApp : IDisposable
         _surface?.Dispose();
         _surface = null;
 
-        _renderTarget?.Dispose();
-        _renderTarget = null;
+        _renderTarget.Dispose();
 
         _ui.LastFramebufferSize = framebufferSize;
 
@@ -239,6 +247,10 @@ public sealed class HomeBaseApp : IDisposable
             _renderTarget,
             GRSurfaceOrigin.BottomLeft,
             SKColorType.Rgba8888);
+        if (_surface == null)
+        {
+            throw new Exception("Failed to create skia surface");
+        }
     }
 
 
@@ -767,14 +779,14 @@ public sealed class HomeBaseApp : IDisposable
 
         _disposed = true;
 
-        _hotKey?.Dispose();
+        _hotKey.Dispose();
         _surface?.Dispose();
-        _renderTarget?.Dispose();
-        _grContext?.Dispose();
-        _input?.Dispose();
+        _renderTarget.Dispose();
+        _grContext.Dispose();
+        _input.Dispose();
 
         TrayIcon.Remove();
 
-        _window?.Dispose();
+        _window.Dispose();
     }
 }
