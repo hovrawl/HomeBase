@@ -223,6 +223,7 @@ public sealed class HomeBaseApp : IDisposable
         }
 
         if (_surface is not null &&
+            _renderTarget is not null &&
             framebufferSize == _ui.LastFramebufferSize)
         {
             return;
