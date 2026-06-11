@@ -24,6 +24,7 @@ public sealed class HomeBaseApp : IDisposable
     private GRContext? _grContext;
     private GRBackendRenderTarget? _renderTarget;
     private SKSurface? _surface;
+    private readonly RenderTheme _renderTheme;
 
     private readonly UIState _ui = new();
     private readonly InputState _inputState = new();
@@ -32,10 +33,14 @@ public sealed class HomeBaseApp : IDisposable
     private bool _disposed;
     private HWND _hwnd;
     private GlobalHotkey? _hotKey;
-    
+
     public HomeBaseApp()
     {
-        _renderer = new DockRenderer(_ui, _inputState, _storageService, _actionQueue);
+        var savedThemes = _storageService.GetSavedThemes();
+        var firstTheme = savedThemes.FirstOrDefault();
+        
+        _renderTheme = new RenderTheme(firstTheme);
+        _renderer = new DockRenderer(_ui, _inputState, _storageService, _actionQueue, _renderTheme);
     }
 
     private List<StorageService.DockItem> DockItems => _storageService.Items;

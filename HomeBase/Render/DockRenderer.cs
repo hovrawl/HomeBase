@@ -13,17 +13,19 @@ public sealed class DockRenderer
     private readonly InputState _input;
     private readonly StorageService _storage;
     private readonly ConcurrentQueue<AppAction> _actionQueue;
+    private readonly RenderTheme _renderTheme;
 
-    public DockRenderer(
-        UIState ui,
+    public DockRenderer(UIState ui,
         InputState input,
         StorageService storage,
-        ConcurrentQueue<AppAction> actionQueue)
+        ConcurrentQueue<AppAction> actionQueue,
+        RenderTheme renderTheme)
     {
         _ui = ui;
         _input = input;
         _storage = storage;
         _actionQueue = actionQueue;
+        _renderTheme = renderTheme;
     }
 
     private List<StorageService.DockItem> DockItems => _storage.Items;
@@ -52,7 +54,7 @@ public sealed class DockRenderer
 
         using var panelPaint = new SKPaint();
         panelPaint.IsAntialias = true;
-        panelPaint.Color = new SKColor(242, 242, 242, 232);
+        panelPaint.Color = _renderTheme.PanelBackgroundPaint.Color;
 
         float radius = Helpers.LogicalToFramebufferPixels(_ui.BufferScale, 12);
         canvas.DrawRoundRect(panelRect, radius, radius, panelPaint);

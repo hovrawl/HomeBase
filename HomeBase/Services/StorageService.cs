@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using HomeBase.Render;
 using SkiaSharp;
 
 namespace HomeBase.Services;
@@ -10,6 +11,7 @@ public class StorageService
     private readonly string _filePath;
     private readonly string _notesPath;
     private readonly string _taskListsPath;
+    private readonly string _themesPath;
 
     
     private readonly Dictionary<string, Note> _noteCache = new();
@@ -35,6 +37,9 @@ public class StorageService
         _taskListsPath = Path.Combine(appDataFolder, "TaskLists");
         Directory.CreateDirectory(_taskListsPath);
 
+        _themesPath = Path.Combine(appDataFolder, "Themes");
+        Directory.CreateDirectory(_themesPath);
+        
         Items = LoadItems();
     }
 
@@ -125,10 +130,26 @@ public class StorageService
         return image;
     }
 
+    public List<SavedTheme> GetSavedThemes()
+    {
+        List<SavedTheme> themes = new();
+        foreach (string themePath in Directory.GetFiles(_themesPath))
+        {
+            var themeText = File.ReadAllText(themePath);
+            if (string.IsNullOrEmpty(themeText)) continue;
+            var theme = JsonSerializer.Deserialize(themeText, Helpers.DockItemSerializerContext.Default.SavedTheme);
+            if (theme is null) continue;
+            themes.Add(theme);
+        }
+
+        return themes;
+    }
+    
     public record struct DockItem(string Name, string Value, ItemType Type);
     public record struct Note(string Id, string Content);
     public record struct TaskItem(string Text, bool IsCompleted);
     public record struct TaskList(string Id, List<TaskItem> Tasks);
+
 }
 
 public enum ItemType
