@@ -9,66 +9,80 @@ internal sealed class GlobalHotkey : IDisposable
     private const int HOTKEY_ID = 1;
 
     private readonly Thread _thread;
+    private readonly Action _onHotkey;
+    private readonly ManualResetEventSlim _started = new();
+
     private uint _threadId;
-    private CancellationTokenSource _cts = new();
+    private bool _disposed;
 
     public GlobalHotkey(Action onHotkey)
     {
+        _onHotkey = onHotkey;
 
-        // Ctrl + Space
+        _thread = new Thread(RunMessageLoop);
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.IsBackground = true;
+        _thread.Start();
+
+        _started.Wait();
+    }
+
+    private void RunMessageLoop()
+    {
+        _threadId = PInvoke.GetCurrentThreadId();
+
+        // Force this thread's message queue to be created before Dispose can PostThreadMessage.
+        PInvoke.PeekMessage(out _, HWND.Null, 0, 0, PEEK_MESSAGE_REMOVE_TYPE.PM_NOREMOVE);
+
         const HOT_KEY_MODIFIERS modifiers = HOT_KEY_MODIFIERS.MOD_CONTROL;
         const uint virtualKey = (uint)VIRTUAL_KEY.VK_SPACE;
 
         if (!PInvoke.RegisterHotKey(HWND.Null, HOTKEY_ID, modifiers, virtualKey))
         {
-            throw new InvalidOperationException("Failed to register global hotkey.");
+            _started.Set();
+            return;
         }
-        
-        _thread = new Thread(() => RunMessageLoop(onHotkey,_cts.Token));
-        _thread.SetApartmentState(ApartmentState.STA);
-        _thread.IsBackground = true;
-        _thread.Start();
-    }
-    
-    public void RunMessageLoop(Action onHotkey,CancellationToken token)
-    {
+
+        _started.Set();
+
         try
         {
-            _threadId = PInvoke.GetCurrentThreadId();
             while (PInvoke.GetMessage(out MSG msg, HWND.Null, 0, 0).Value > 0)
             {
-                if (token.IsCancellationRequested)
-                {
-                    break;
-                }
-
                 if (msg.message == WM_HOTKEY && msg.wParam.Value == HOTKEY_ID)
                 {
-                    onHotkey();
+                    _onHotkey();
                 }
 
                 PInvoke.TranslateMessage(msg);
                 PInvoke.DispatchMessage(msg);
             }
         }
-        catch { /* ignored */ }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+        }
+        finally
+        {
+            PInvoke.UnregisterHotKey(HWND.Null, HOTKEY_ID);
+        }
     }
-    
+
     public void Dispose()
     {
-        // signal thread/message loop to stop
-        _cts.Cancel();
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
 
         if (_threadId != 0)
         {
             PInvoke.PostThreadMessage(_threadId, PInvoke.WM_QUIT, default, default);
         }
-        
+
         _thread.Join(TimeSpan.FromSeconds(1));
-        
-        // unregister hotkey
-        PInvoke.UnregisterHotKey(HWND.Null, HOTKEY_ID);
-        
-        _cts.Dispose();
+        _started.Dispose();
     }
 }

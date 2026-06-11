@@ -1,3 +1,4 @@
+using HomeBase.Enums;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using SkiaSharp;
@@ -33,9 +34,7 @@ public struct UIState
     public SKRect ContextMenuRect { get; set; }
     public Vector2D<int> ContextMenuPosition { get; set; }
     public int ContextMenuItemIndex { get; set; }
-
-    public Vector2D<int> DockHiddenPosition { get; set; } = new(0, 0);
-
+    
     public UIState()
     {
     }

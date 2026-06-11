@@ -11,8 +11,3 @@ GlfwInput.RegisterPlatform();
 using var app = new HomeBaseApp();
 
 app.Run();
-
-
-public enum ViewMode { All, Grouped }
-
-public enum UIAnimationState { Hidden, Showing, Shown, Hiding }

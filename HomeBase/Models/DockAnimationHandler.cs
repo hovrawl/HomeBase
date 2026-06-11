@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using HomeBase.Enums;
 using Silk.NET.Maths;
 
 namespace HomeBase.Models;

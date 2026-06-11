@@ -4,6 +4,8 @@ GetMessage
 TranslateMessage
 DispatchMessage
 VIRTUAL_KEY
+PeekMessage
+PEEK_MESSAGE_REMOVE_TYPE
 
 DwmSetWindowAttribute
 DwmExtendFrameIntoClientArea

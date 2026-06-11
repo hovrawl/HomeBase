@@ -7,6 +7,7 @@ using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.System.Com;
 using Windows.Win32.UI.Shell;
+using HomeBase.Enums;
 using HomeBase.Models;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -67,7 +68,7 @@ public sealed class HomeBaseApp : IDisposable
         if (_window.Monitor != null)
         {
             CalculateDockPositions();
-            _window.Position = _ui.DockHiddenPosition;
+            _window.Position = _animation.HiddenPosition;
             _ui.SetFramebufferScale(_window);
         }
 
@@ -141,7 +142,11 @@ public sealed class HomeBaseApp : IDisposable
         if (!_ui.DidInitialLayout) WindowLayout();
         
         // Dock summon/hide animation
-        _animation.Update(deltaTime);
+        var animatedPosition = _animation.Update(deltaTime);
+        if (animatedPosition != null && animatedPosition != _window.Position)
+        {
+            _window.Position = animatedPosition.Value;
+        }
         
         //if (SummonCalled) SummonDock();
         
@@ -248,7 +253,7 @@ public sealed class HomeBaseApp : IDisposable
         _ui.DidInitialLayout = true;
     
         CalculateDockPositions();
-        _window.Position = _ui.DockHiddenPosition;
+        _window.Position = _animation.HiddenPosition;
         _animation.Hide(_window.Position);
     }
 
@@ -701,7 +706,7 @@ public sealed class HomeBaseApp : IDisposable
 
         if (_animation.State == UIAnimationState.Hidden)
         {
-            _window.Position = _ui.DockHiddenPosition;
+            _window.Position = _animation.HiddenPosition;
         }
         
         _animation.Show(_window.Position);
@@ -759,6 +764,7 @@ public sealed class HomeBaseApp : IDisposable
 
         _disposed = true;
 
+        _hotKey?.Dispose();
         _surface?.Dispose();
         _renderTarget?.Dispose();
         _grContext?.Dispose();
