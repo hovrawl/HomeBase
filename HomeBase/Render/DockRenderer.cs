@@ -32,8 +32,8 @@ public sealed class DockRenderer
 
     public void Render(SKCanvas canvas)
     {
-        // Clear canvas with transparent background
-        canvas.Clear(SKColors.Transparent);
+        // Clear canvas with theme background
+        canvas.Clear(_renderTheme.Surfaces.CanvasClear);
         
         SKRect panelRect = DrawBackground(canvas);
         DrawDock(canvas, panelRect);
@@ -52,26 +52,9 @@ public sealed class DockRenderer
             bounds.Width - 0.5f,
             bounds.Height - 0.5f);
 
-        using var panelPaint = new SKPaint();
-        panelPaint.IsAntialias = true;
-        panelPaint.Color = _renderTheme.PanelBackgroundPaint.Color;
-
         float radius = Helpers.LogicalToFramebufferPixels(_ui.BufferScale, 12);
-        canvas.DrawRoundRect(panelRect, radius, radius, panelPaint);
-
-        using var borderPaint = new SKPaint();
-        borderPaint.IsAntialias = true;
-        borderPaint.Style = SKPaintStyle.Stroke;
-        borderPaint.StrokeWidth = 1;
-        borderPaint.Color = new SKColor(255, 255, 255, 120);
-
-        canvas.DrawRoundRect(panelRect, radius, radius, borderPaint);
-
-        using var innerBorderPaint = new SKPaint();
-        innerBorderPaint.IsAntialias = true;
-        innerBorderPaint.Style = SKPaintStyle.Stroke;
-        innerBorderPaint.StrokeWidth = 1;
-        innerBorderPaint.Color = new SKColor(0, 0, 0, 24);
+        canvas.DrawRoundRect(panelRect, radius, radius, _renderTheme.PanelBackgroundPaint);
+        canvas.DrawRoundRect(panelRect, radius, radius, _renderTheme.PanelOuterBorderPaint);
 
         var innerRect = new SKRect(
             panelRect.Left + 1,
@@ -79,7 +62,7 @@ public sealed class DockRenderer
             panelRect.Right - 1,
             panelRect.Bottom - 1);
 
-        canvas.DrawRoundRect(innerRect, radius, radius, innerBorderPaint);
+        canvas.DrawRoundRect(innerRect, radius, radius, _renderTheme.PanelInnerBorderPaint);
 
         return panelRect;
     }
@@ -118,17 +101,13 @@ public sealed class DockRenderer
         canvas.Restore();
         
         // Footer
-        using var footerPaint = new SKPaint();
-        footerPaint.IsAntialias = true;
-        footerPaint.Color = new SKColor(255, 255, 255, 105);
-
         var footerRect = new SKRect(
             panelRect.Left + 16,
             panelRect.Bottom - 72,
             panelRect.Right - 16,
             panelRect.Bottom - 16);
 
-        canvas.DrawRoundRect(footerRect, 16, 16, footerPaint);
+        canvas.DrawRoundRect(footerRect, 16, 16, _renderTheme.FooterBackgroundPaint);
 
         // View Mode Toggle
         var modeBtnRect = new SKRect(footerRect.Left + 12, footerRect.Top + 12, footerRect.Left + 120, footerRect.Bottom - 12);
@@ -141,10 +120,10 @@ public sealed class DockRenderer
         var scaleLabelRect = new SKRect(modeBtnRect.Right + 12, footerRect.Top, modeBtnRect.Right + 80, footerRect.Bottom);
         using var labelPaint = new SKPaint();
         labelPaint.IsAntialias = true;
-        labelPaint.Color = SKColors.DimGray;
+        labelPaint.Color = _renderTheme.Text.Secondary;
         using var labelFont = new SKFont();
         labelFont.Size = 12;
-        labelFont.Typeface = SKTypeface.FromFamilyName("Segoe UI");
+        labelFont.Typeface = _renderTheme.RegularTypeface;
         canvas.DrawText($"Size: {(int)(_ui.ItemScale * 100)}%", scaleLabelRect.Left, footerRect.MidY + 5, labelFont, labelPaint);
 
         var minusBtnRect = new SKRect(scaleLabelRect.Right, footerRect.Top + 12, scaleLabelRect.Right + 32, footerRect.Bottom - 12);
@@ -243,10 +222,10 @@ public sealed class DockRenderer
         {
             using var groupTitlePaint = new SKPaint();
             groupTitlePaint.IsAntialias = true;
-            groupTitlePaint.Color = SKColors.DimGray;
+            groupTitlePaint.Color = _renderTheme.Text.Secondary;
             using var groupTitleFont = new SKFont();
             groupTitleFont.Size = 14;
-            groupTitleFont.Typeface = SKTypeface.FromFamilyName("Segoe UI Semibold");
+            groupTitleFont.Typeface = _renderTheme.SemiboldTypeface;
 
             canvas.DrawText("All Items", dockPanel.Left + 32, dockPanel.Top + currentY + 20, groupTitleFont, groupTitlePaint);
             currentY += 30;
@@ -271,10 +250,10 @@ public sealed class DockRenderer
 
                 using var groupTitlePaint = new SKPaint();
                 groupTitlePaint.IsAntialias = true;
-                groupTitlePaint.Color = SKColors.DimGray;
+                groupTitlePaint.Color = _renderTheme.Text.Secondary;
                 using var groupTitleFont = new SKFont();
                 groupTitleFont.Size = 14;
-                groupTitleFont.Typeface = SKTypeface.FromFamilyName("Segoe UI Semibold");
+                groupTitleFont.Typeface = _renderTheme.SemiboldTypeface;
 
                 canvas.DrawText(groupName, dockPanel.Left + 32, dockPanel.Top + currentY + 20, groupTitleFont, groupTitlePaint);
                 currentY += 30;
@@ -394,20 +373,20 @@ public sealed class DockRenderer
         
         using var paint = new SKPaint();
         paint.IsAntialias = true;
-        paint.Color = SKColors.Black;
+        paint.Color = _renderTheme.Text.Primary;
         using var font = new SKFont();
         font.Size = 11 * _ui.ItemScale;
-        font.Typeface = SKTypeface.FromFamilyName("Segoe UI");
+        font.Typeface = _renderTheme.RegularTypeface;
 
         if (isRenaming)
         {
             // Draw background for editing
             using var bgPaint = new SKPaint();
-            bgPaint.Color = SKColors.White;
+            bgPaint.Color = _renderTheme.Rename.Background;
             bgPaint.IsAntialias = true;
             canvas.DrawRoundRect(rect, 4 * _ui.ItemScale, 4 * _ui.ItemScale, bgPaint);
             using var borderPaint = new SKPaint();
-            borderPaint.Color = SKColors.DodgerBlue;
+            borderPaint.Color = _renderTheme.Rename.Border;
             borderPaint.IsAntialias = true;
             borderPaint.Style = SKPaintStyle.Stroke;
             borderPaint.StrokeWidth = 1 * _ui.ItemScale;
@@ -420,7 +399,7 @@ public sealed class DockRenderer
             // Draw caret
             float caretX = textX + font.MeasureText(text.Substring(0, Math.Clamp(_ui.RenamingCaretIndex, 0, text.Length)));
             using var caretPaint = new SKPaint();
-            caretPaint.Color = SKColors.Black;
+            caretPaint.Color = _renderTheme.Text.Caret;
             caretPaint.StrokeWidth = 1 * _ui.ItemScale;
             canvas.DrawLine(caretX, rect.Top + 4 * _ui.ItemScale, caretX, rect.Bottom - 4 * _ui.ItemScale, caretPaint);
 
@@ -485,8 +464,7 @@ public sealed class DockRenderer
         bool clicked = active && hovered && _input.LeftMouseReleased;
         rightClicked = active && hovered && _input.RightMouseReleased;
 
-        var bgColor = focused ? new SKColor(255, 255, 180) : new SKColor(255, 255, 220);
-        if (pressed) bgColor = new SKColor(240, 240, 160);
+        var bgColor = _renderTheme.GetNoteCardColor(focused, pressed);
 
         using var paint = new SKPaint();
         paint.IsAntialias = true;
@@ -497,9 +475,10 @@ public sealed class DockRenderer
         var note = GetNote(item.Value);
         using var textPaint = new SKPaint();
         textPaint.IsAntialias = true;
-        textPaint.Color = SKColors.Black;
+        textPaint.Color = _renderTheme.Cards.Note.Text;
         using var font = new SKFont();
         font.Size = 11 * _ui.ItemScale;
+        font.Typeface = _renderTheme.RegularTypeface;
         var textPadding = 6 * _ui.ItemScale;
         var textRect = new SKRect(rect.Left + textPadding, rect.Top + textPadding, rect.Right - textPadding, rect.Bottom - textPadding);
         DrawTextInRect(canvas, note.Content, textRect, font, textPaint, focused);
@@ -508,7 +487,7 @@ public sealed class DockRenderer
         {
             using var borderPaint = new SKPaint();
             borderPaint.IsAntialias = true;
-            borderPaint.Color = new SKColor(255, 165, 0);
+            borderPaint.Color = _renderTheme.Cards.Note.FocusBorder;
             borderPaint.Style = SKPaintStyle.Stroke;
             borderPaint.StrokeWidth = 2 * _ui.ItemScale;
             canvas.DrawRoundRect(rect, radius, radius, borderPaint);
@@ -534,8 +513,7 @@ public sealed class DockRenderer
         bool clicked = active && hovered && _input.LeftMouseReleased;
         rightClicked = active && hovered && _input.RightMouseReleased;
 
-        var bgColor = focused ? new SKColor(240, 240, 240) : new SKColor(255, 255, 255);
-        if (pressed) bgColor = new SKColor(220, 220, 220);
+        var bgColor = _renderTheme.GetTaskListCardColor(focused, pressed);
 
         using var paint = new SKPaint();
         paint.IsAntialias = true;
@@ -546,9 +524,10 @@ public sealed class DockRenderer
         var list = GetTaskList(item.Value);
         using var textPaint = new SKPaint();
         textPaint.IsAntialias = true;
-        textPaint.Color = SKColors.Black;
+        textPaint.Color = _renderTheme.Cards.TaskList.Text;
         using var font = new SKFont();
         font.Size = 10 * _ui.ItemScale;
+        font.Typeface = _renderTheme.RegularTypeface;
 
         float itemHeight = 14 * _ui.ItemScale;
         float circleSize = 10 * _ui.ItemScale;
@@ -572,7 +551,7 @@ public sealed class DockRenderer
             using var circlePaint = new SKPaint();
             circlePaint.IsAntialias = true;
             circlePaint.Style = SKPaintStyle.Stroke;
-            circlePaint.Color = SKColors.Gray;
+            circlePaint.Color = _renderTheme.Cards.TaskList.CircleBorder;
             circlePaint.StrokeWidth = 1 * _ui.ItemScale;
             canvas.DrawOval(circleRect, circlePaint);
             
@@ -580,7 +559,7 @@ public sealed class DockRenderer
             {
                 using var checkPaint = new SKPaint();
                 checkPaint.IsAntialias = true;
-                checkPaint.Color = SKColors.Green;
+                checkPaint.Color = _renderTheme.Cards.TaskList.CompletedFill;
                 checkPaint.Style = SKPaintStyle.Fill;
                 circleRect.Inflate(-1 * _ui.ItemScale, -1 * _ui.ItemScale);
                 canvas.DrawOval(circleRect, checkPaint);
@@ -594,7 +573,7 @@ public sealed class DockRenderer
             {
                 float caretX = textX + font.MeasureText(task.Text.Substring(0, Math.Clamp(_ui.CaretIndex, 0, task.Text.Length)));
                 using var caretPaint = new SKPaint();
-                caretPaint.Color = SKColors.Black;
+                caretPaint.Color = _renderTheme.Text.Caret;
                 caretPaint.StrokeWidth = 1 * _ui.ItemScale;
                 canvas.DrawLine(caretX, ty + itemHeight * 0.2f, caretX, ty + itemHeight * 0.8f, caretPaint);
             }
@@ -621,7 +600,7 @@ public sealed class DockRenderer
         {
             using var borderPaint = new SKPaint();
             borderPaint.IsAntialias = true;
-            borderPaint.Color = SKColors.DodgerBlue;
+            borderPaint.Color = _renderTheme.Cards.TaskList.FocusBorder;
             borderPaint.Style = SKPaintStyle.Stroke;
             borderPaint.StrokeWidth = 2 * _ui.ItemScale;
             canvas.DrawRoundRect(rect, radius, radius, borderPaint);
@@ -690,7 +669,7 @@ public sealed class DockRenderer
         if (isFocused && text == "")
         {
             using var caretPaint = new SKPaint();
-            caretPaint.Color = SKColors.Black;
+            caretPaint.Color = _renderTheme.Text.Caret;
             caretPaint.StrokeWidth = 1 * _ui.ItemScale;
             canvas.DrawLine(rect.Left, y - font.Size, rect.Left, y + 2, caretPaint);
         }
@@ -728,7 +707,7 @@ public sealed class DockRenderer
                 {
                     float caretX = lx + font.MeasureText(lineText.Substring(0, _ui.CaretIndex - startIdx));
                     using var caretPaint = new SKPaint();
-                    caretPaint.Color = SKColors.Black;
+                    caretPaint.Color = _renderTheme.Text.Caret;
                     caretPaint.StrokeWidth = 1 * _ui.ItemScale;
                     canvas.DrawLine(caretX, ly - font.Size, caretX, ly + 2, caretPaint);
                 }
@@ -759,11 +738,7 @@ public sealed class DockRenderer
         bool pressed = active && _input.LeftMouseDown;
         bool clicked = active && hovered && _input.LeftMouseReleased;
 
-        var color = pressed
-            ? new SKColor(180, 180, 180, 255)
-            : hovered
-                ? new SKColor(220, 220, 220, 255)
-                : new SKColor(200, 200, 200, 255);
+        var color = _renderTheme.GetNeutralButtonColor(hovered, pressed);
 
         using var buttonPaint = new SKPaint();
         buttonPaint.IsAntialias = true;
@@ -773,10 +748,10 @@ public sealed class DockRenderer
 
         using var textPaint = new SKPaint();
         textPaint.IsAntialias = true;
-        textPaint.Color = SKColors.Black;
+        textPaint.Color = _renderTheme.Buttons.Text;
         using var font = new SKFont();
         font.Size = 13;
-        font.Typeface = SKTypeface.FromFamilyName("Segoe UI");
+        font.Typeface = _renderTheme.RegularTypeface;
 
         var textWidth = font.MeasureText(text);
         
@@ -805,11 +780,7 @@ public sealed class DockRenderer
         bool clicked = active && hovered && _input.LeftMouseReleased;
         rightClicked = active && hovered && _input.RightMouseReleased;
 
-        var cardColor = pressed
-            ? new SKColor(230, 230, 230, 180)
-            : hovered
-                ? new SKColor(255, 255, 255, 180)
-                : new SKColor(255, 255, 255, 130);
+        var cardColor = _renderTheme.GetFileCardColor(hovered, pressed);
 
         using var cardPaint = new SKPaint();
         cardPaint.IsAntialias = true;
@@ -855,11 +826,7 @@ public sealed class DockRenderer
         bool pressed = active && _input.LeftMouseDown;
         bool clicked = active && hovered && _input.LeftMouseReleased;
 
-        var color = pressed
-            ? new SKColor(60, 100, 200, 255)
-            : hovered
-                ? new SKColor(95, 135, 235, 255)
-                : new SKColor(80, 120, 220, 255);
+        var color = _renderTheme.GetPrimaryButtonColor(hovered, pressed);
 
         using var buttonPaint = new SKPaint();
         buttonPaint.IsAntialias = true;
@@ -869,7 +836,7 @@ public sealed class DockRenderer
 
         using var plusPaint = new SKPaint();
         plusPaint.IsAntialias = true;
-        plusPaint.Color = SKColors.White;
+        plusPaint.Color = _renderTheme.PrimaryButton.Foreground;
         plusPaint.StrokeWidth = 3;
         plusPaint.Style = SKPaintStyle.Stroke;
         plusPaint.StrokeCap = SKStrokeCap.Round;
@@ -912,7 +879,7 @@ public sealed class DockRenderer
 
         using var menuPaint = new SKPaint();
         menuPaint.IsAntialias = true;
-        menuPaint.Color = new SKColor(255, 255, 255, 245);
+        menuPaint.Color = _renderTheme.MenuBackgroundPaint.Color;
 
         canvas.DrawRoundRect(_ui.AddMenuRect, 12, 12, menuPaint);
 
@@ -965,11 +932,7 @@ public sealed class DockRenderer
         bool pressed = active && _input.LeftMouseDown;
         bool clicked = active && hovered && _input.LeftMouseReleased;
 
-        var backgroundColor = pressed
-            ? new SKColor(220, 220, 220, 255)
-            : hovered
-                ? new SKColor(235, 235, 235, 255)
-                : SKColors.Transparent;
+        var backgroundColor = _renderTheme.GetMenuItemColor(hovered, pressed);
 
         using var backgroundPaint = new SKPaint();
         backgroundPaint.IsAntialias = true;
@@ -979,11 +942,11 @@ public sealed class DockRenderer
 
         using var textPaint = new SKPaint();
         textPaint.IsAntialias = true;
-        textPaint.Color = new SKColor(32, 32, 32, 255);
+        textPaint.Color = _renderTheme.Menu.ItemText;
 
         using var textFont = new SKFont();
         textFont.Size = 16;
-        textFont.Typeface = SKTypeface.FromFamilyName("Segoe UI");
+        textFont.Typeface = _renderTheme.RegularTypeface;
 
         canvas.DrawText(text, rect.Left + 12, rect.MidY + 6, textFont, textPaint);
 
@@ -1036,7 +999,7 @@ public sealed class DockRenderer
 
         using var menuPaint = new SKPaint();
         menuPaint.IsAntialias = true;
-        menuPaint.Color = new SKColor(255, 255, 255, 245);
+        menuPaint.Color = _renderTheme.MenuBackgroundPaint.Color;
 
         canvas.DrawRoundRect(_ui.ContextMenuRect, 12, 12, menuPaint);
 
